@@ -13,5 +13,6 @@ obj-$(CONFIG_WAKELOCK)		+= wakelock.o
 obj-$(CONFIG_USER_WAKELOCK)	+= userwakelock.o
 obj-$(CONFIG_SUSPEND_TIME)	+= suspend_time.o
 obj-$(CONFIG_PM_AUTOSLEEP)	+= autosleep.o
+obj-$(CONFIG_PM_WAKELOCKS)	+= wakelock.o
 
 obj-$(CONFIG_MAGIC_SYSRQ)	+= poweroff.o
