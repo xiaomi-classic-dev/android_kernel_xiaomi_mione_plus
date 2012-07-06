@@ -946,6 +946,7 @@ int read_current_timer(unsigned long *timer_val)
 	*timer_val = msm_read_timer_count(dgt, GLOBAL_TIMER);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(read_current_timer);
 
 static void __init msm_sched_clock_init(void)
 {
