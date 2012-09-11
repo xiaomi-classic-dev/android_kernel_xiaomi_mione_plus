@@ -71,11 +71,17 @@ static int alloc_ion_mem(struct smem_client *client, size_t size,
 	int rc = 0;
 	if (size == 0)
 		goto skip_mem_alloc;
-	flags = flags | ION_HEAP(ION_CP_MM_HEAP_ID);
-	hndl = ion_alloc(client->clnt, size, align, flags);
+	unsigned long ionflags = 0;
+	if (flags == ION_FLAG_CACHED)
+		ionflags = ION_SET_CACHED(ionflags);
+	else
+		ionflags = ION_SET_UNCACHED(ionflags);
+
+	ionflags = ionflags | ION_HEAP(ION_CP_MM_HEAP_ID);
+	hndl = ion_alloc(client->clnt, size, align, ionflags);
 	if (IS_ERR_OR_NULL(hndl)) {
 		pr_err("Failed to allocate shared memory = %p, %d, %d, 0x%x\n",
-				client, size, align, flags);
+				client, size, align, ionflags);
 		rc = -ENOMEM;
 		goto fail_shared_mem_alloc;
 	}
