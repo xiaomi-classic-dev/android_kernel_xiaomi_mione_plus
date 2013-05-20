@@ -26,6 +26,9 @@
 #include <linux/of_platform.h>
 #include <linux/msm_ssbi.h>
 #include <mach/msm_bus.h>
+#ifdef CONFIG_MACH_MIONE
+#include <mach/board-ext-mione.h>
+#endif
 
 struct msm_camera_io_ext {
 	uint32_t mdcphy;
@@ -61,6 +64,12 @@ struct msm_camera_device_platform_data {
 	struct msm_camera_io_ext ioext;
 	struct msm_camera_io_clk ioclk;
 	uint8_t csid_core;
+#ifdef CONFIG_MACH_MIONE
+	uint8_t is_csiphy;
+	uint8_t is_csic;
+	uint8_t is_csid;
+	uint8_t is_ispif;
+#endif
 	uint8_t is_vpe;
 	struct msm_bus_scale_pdata *cam_bus_scale_table;
 };
@@ -128,6 +137,9 @@ struct msm_camera_sensor_flash_led {
 
 struct msm_camera_sensor_flash_src {
 	int flash_sr_type;
+#ifdef CONFIG_MACH_MIONE
+	int (*camera_flash)(int level);
+#endif
 
 	union {
 		struct msm_camera_sensor_flash_pmic pmic_src;
@@ -194,6 +206,10 @@ struct msm_camera_gpio_conf {
 	uint8_t camera_off_table_size;
 	uint32_t *camera_on_table;
 	uint8_t camera_on_table_size;
+#ifdef CONFIG_MACH_MIONE
+	uint16_t *cam_gpio_tbl;
+	uint8_t cam_gpio_tbl_size;
+#endif
 };
 
 enum msm_camera_i2c_mux_mode {
@@ -224,6 +240,14 @@ struct msm_camera_sensor_platform_info {
 	struct msm_camera_gpio_conf *gpio_conf;
 	struct msm_camera_i2c_conf *i2c_conf;
 	struct msm_camera_csi_lane_params *csi_lane_params;
+#ifdef CONFIG_MACH_MIONE
+	int sensor_reset_enable;
+	int sensor_pwd;
+	int vcm_pwd;
+	int vcm_enable;
+	int privacy_light;
+	void *privacy_light_info;
+#endif
 };
 
 enum msm_camera_actuator_name {
@@ -249,9 +273,11 @@ struct msm_actuator_info {
 struct msm_eeprom_info {
 	struct i2c_board_info const *board_info;
 	int bus_id;
+#ifndef CONFIG_MACH_MIONE
 	int eeprom_reg_addr;
 	int eeprom_read_length;
 	int eeprom_i2c_slave_addr;
+#endif
 };
 
 struct msm_camera_sensor_info {
@@ -276,6 +302,9 @@ struct msm_camera_sensor_info {
 	struct msm_actuator_info *actuator_info;
 	int pmic_gpio_enable;
 	struct msm_eeprom_info *eeprom_info;
+#ifdef CONFIG_MACH_MIONE
+	struct msm_camera_gpio_conf *gpio_conf;
+#endif
 };
 
 struct msm_camera_board_info {
