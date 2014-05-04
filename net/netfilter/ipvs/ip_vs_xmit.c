@@ -430,7 +430,7 @@ ip_vs_bypass_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	skb_dst_set(skb, &rt->dst);
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT(NFPROTO_IPV4, skb, cp, 0);
 
@@ -489,7 +489,7 @@ ip_vs_bypass_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	skb_dst_set(skb, &rt->dst);
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT(NFPROTO_IPV6, skb, cp, 0);
 
@@ -608,7 +608,7 @@ ip_vs_nat_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	   MTU problem. */
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT_NAT(NFPROTO_IPV4, skb, cp, local);
 
@@ -723,7 +723,7 @@ ip_vs_nat_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	   MTU problem. */
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT_NAT(NFPROTO_IPV6, skb, cp, local);
 
@@ -856,7 +856,7 @@ ip_vs_tunnel_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	ip_select_ident(skb, NULL);
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	ret = IP_VS_XMIT_TUNNEL(skb, cp);
 	if (ret == NF_ACCEPT)
@@ -972,7 +972,7 @@ ip_vs_tunnel_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	iph->hop_limit		=	old_iph->hop_limit;
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	ret = IP_VS_XMIT_TUNNEL(skb, cp);
 	if (ret == NF_ACCEPT)
@@ -1046,7 +1046,7 @@ ip_vs_dr_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	skb_dst_set(skb, &rt->dst);
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT(NFPROTO_IPV4, skb, cp, 0);
 
@@ -1109,7 +1109,7 @@ ip_vs_dr_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	skb_dst_set(skb, &rt->dst);
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT(NFPROTO_IPV6, skb, cp, 0);
 
@@ -1230,7 +1230,7 @@ ip_vs_icmp_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 	}
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT_NAT(NFPROTO_IPV4, skb, cp, local);
 
@@ -1348,7 +1348,7 @@ ip_vs_icmp_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 	}
 
 	/* Another hack: avoid icmp_send in ip_fragment */
-	skb->local_df = 1;
+	skb->ignore_df = 1;
 
 	IP_VS_XMIT_NAT(NFPROTO_IPV6, skb, cp, local);
 

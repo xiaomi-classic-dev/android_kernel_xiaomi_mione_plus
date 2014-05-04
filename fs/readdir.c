@@ -124,7 +124,6 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
 	if (!file)
 		goto out;
 
-	buf.romnt = (file->f_path.dentry->d_sb->s_flags & MS_RDONLY);
 	error = iterate_dir(file, &buf.ctx);
 	if (buf.result)
 		error = buf.result;
@@ -219,7 +218,6 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
 	if (!file)
 		goto out;
 
-	buf.romnt = (file->f_path.dentry->d_sb->s_flags & MS_RDONLY);
 	error = iterate_dir(file, &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
@@ -303,7 +301,6 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
 	if (!file)
 		goto out;
 
-	buf.romnt = (file->f_path.dentry->d_sb->s_flags & MS_RDONLY);
 	error = iterate_dir(file, &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
