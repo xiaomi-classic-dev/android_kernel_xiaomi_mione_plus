@@ -473,6 +473,9 @@ msmsdcc_start_command_exec(struct msmsdcc_host *host, u32 arg, u32 c)
 {
 	writel_relaxed(arg, host->base + MMCIARGUMENT);
 	writel_relaxed(c, host->base + MMCICOMMAND);
+	host->last_cmds[host->last_cmd_index][0] = c;
+	host->last_cmds[host->last_cmd_index][1] = arg;
+	host->last_cmd_index = (host->last_cmd_index + 1) % LAST_CMD_CNT;
 	/*
 	 * As after sending the command, we don't write any of the
 	 * controller registers and just wait for the
@@ -1760,7 +1763,9 @@ msmsdcc_irq(int irq, void *dev_id)
 				 * This is a wakeup interrupt so hold wakelock
 				 * until SDCC resume is handled.
 				 */
-				wake_lock(&host->sdio_wlock);
+				if ((host->plat->mpm_sdiowakeup_int ||
+						host->plat->sdiowakeup_irq))
+					wake_lock(&host->sdio_wlock);
 			} else {
 				spin_unlock(&host->lock);
 				mmc_signal_sdio_irq(host->mmc);
@@ -3993,6 +3998,39 @@ exit:
 	return rc;
 }
 
+static unsigned int
+msmsdcc_slot_status(struct msmsdcc_host *host, int align);
+static void msmsdcc_detection_callback(struct mmc_host *mmc, int notif)
+{
+	struct msmsdcc_host *host = mmc_priv(mmc);
+	int status;
+
+	if (!host->plat->status_gpio)
+		return;
+	/* host->oldstat is not trustable
+	 * and we are ok to sleep here
+	 */
+	status = msmsdcc_slot_status(host, false);
+	if (status < 0) {
+		pr_err("%s: %s: Failed to read gpio state (%d)\n",
+			mmc_hostname(host->mmc), __func__, status);
+	} else if (status == 1) {
+		if ((notif == DETECT_CB_ERROR) || (notif == DETECT_CB_SUCCESS))
+			host->plat->is_status_gpio_active_low = 0;
+		else
+			host->plat->is_status_gpio_active_low = 1;
+	} else {/* status == 0 */
+		if ((notif == DETECT_CB_ERROR) || (notif == DETECT_CB_SUCCESS))
+			host->plat->is_status_gpio_active_low = 1;
+		else
+			host->plat->is_status_gpio_active_low = 0;
+	}
+
+	pr_info("%s %s: status=%d,mmc->card=0x%lx,active_low=%d\n",
+		mmc_hostname(host->mmc), __func__, status, (unsigned long)mmc->card,
+		host->plat->is_status_gpio_active_low);
+}
+
 static const struct mmc_host_ops msmsdcc_ops = {
 	.enable		= msmsdcc_enable,
 	.disable	= msmsdcc_disable,
@@ -4003,14 +4041,35 @@ static const struct mmc_host_ops msmsdcc_ops = {
 	.get_ro		= msmsdcc_get_ro,
 	.enable_sdio_irq = msmsdcc_enable_sdio_irq,
 	.start_signal_voltage_switch = msmsdcc_switch_io_voltage,
-	.execute_tuning = msmsdcc_execute_tuning
+	.execute_tuning = msmsdcc_execute_tuning,
+};
+
+static const struct mmc_host_ops msmsdcc_ops_cb = {
+	.enable		= msmsdcc_enable,
+	.disable	= msmsdcc_disable,
+	.pre_req        = msmsdcc_pre_req,
+	.post_req       = msmsdcc_post_req,
+	.request	= msmsdcc_request,
+	.set_ios	= msmsdcc_set_ios,
+	.get_ro		= msmsdcc_get_ro,
+	.enable_sdio_irq = msmsdcc_enable_sdio_irq,
+	.start_signal_voltage_switch = msmsdcc_switch_io_voltage,
+	.execute_tuning = msmsdcc_execute_tuning,
+	.detection_callback = msmsdcc_detection_callback,
 };
 
 static unsigned int
-msmsdcc_slot_status(struct msmsdcc_host *host)
+msmsdcc_slot_status(struct msmsdcc_host *host, int align)
 {
 	int status;
 	unsigned int gpio_no = host->plat->status_gpio;
+
+	/*
+	 * For the first detection, we always assume
+	 * there is a card in the slot
+	 */
+	if (align && host->plat->is_status_gpio_active_low == -1)
+		return 1;
 
 	status = gpio_request(gpio_no, "SD_HW_Detect");
 	if (status) {
@@ -4020,7 +4079,9 @@ msmsdcc_slot_status(struct msmsdcc_host *host)
 		status = gpio_direction_input(gpio_no);
 		if (!status) {
 			status = gpio_get_value_cansleep(gpio_no);
-			if (host->plat->is_status_gpio_active_low)
+			pr_info("%s %s: status = %d, is_status_gpio_active_low = %d\n",
+				mmc_hostname(host->mmc), __func__, status, host->plat->is_status_gpio_active_low);
+			if (align && host->plat->is_status_gpio_active_low)
 				status = !status;
 		}
 		gpio_free(gpio_no);
@@ -4038,7 +4099,7 @@ msmsdcc_check_status(unsigned long data)
 		if (host->plat->status)
 			status = host->plat->status(mmc_dev(host->mmc));
 		else
-			status = msmsdcc_slot_status(host);
+			status = msmsdcc_slot_status(host, true);
 
 		host->eject = !status;
 
@@ -4063,9 +4124,8 @@ msmsdcc_check_status(unsigned long data)
 			mmc_detect_change(host->mmc, 0);
 		}
 		host->oldstat = status;
-	} else {
+	} else
 		mmc_detect_change(host->mmc, 0);
-	}
 }
 
 static irqreturn_t
@@ -4703,6 +4763,7 @@ static void msmsdcc_print_regs(const char *name, void __iomem *base,
 
 static void msmsdcc_dump_sdcc_state(struct msmsdcc_host *host)
 {
+	int i = 0;
 	/* Dump current state of SDCC clocks, power and irq */
 	pr_info("%s: SDCC PWR is %s\n", mmc_hostname(host->mmc),
 		(host->pwr ? "ON" : "OFF"));
@@ -4746,6 +4807,11 @@ static void msmsdcc_dump_sdcc_state(struct msmsdcc_host *host)
 		host->curr.wait_for_auto_prog_done,
 		host->curr.got_auto_prog_done, host->curr.req_tout_ms);
 	msmsdcc_print_rpm_info(host);
+	pr_info("%s last %d commands: opcode, argument (current %d)\n",
+		mmc_hostname(host->mmc), LAST_CMD_CNT, host->last_cmd_index);
+	for (i = 0; i < LAST_CMD_CNT; i++)
+		pr_info("(0x%lx,0x%lx)\n", (unsigned long)host->last_cmds[i][0],
+			(unsigned long)host->last_cmds[i][1]);
 }
 
 static void msmsdcc_req_tout_timer_hdlr(unsigned long data)
@@ -5296,8 +5362,12 @@ msmsdcc_probe(struct platform_device *pdev)
 
 	/*
 	 * Setup MMC host structure
+	 * Hack: a host with status gpio may interested in callback
 	 */
-	mmc->ops = &msmsdcc_ops;
+	if (plat->status_gpio)
+		mmc->ops = &msmsdcc_ops_cb;
+	else
+		mmc->ops = &msmsdcc_ops;
 	mmc->f_min = msmsdcc_get_min_sup_clk_rate(host);
 	mmc->f_max = msmsdcc_get_max_sup_clk_rate(host);
 	mmc->ocr_avail = plat->ocr_mask;
@@ -5340,7 +5410,7 @@ msmsdcc_probe(struct platform_device *pdev)
 
 	mmc->caps2 |= MMC_CAP2_INIT_BKOPS | MMC_CAP2_BKOPS;
 
-	if (plat->is_sdio_al_client)
+	if (plat->built_in)
 		mmc->pm_flags |= MMC_PM_IGNORE_PM_NOTIFY;
 
 	mmc->max_segs = msmsdcc_get_nr_sg(host);
@@ -5378,6 +5448,7 @@ msmsdcc_probe(struct platform_device *pdev)
 	 */
 	disable_irq(core_irqres->start);
 	host->sdcc_irq_disabled = 1;
+	host->last_cmd_index = 0;
 
 	if (plat->sdiowakeup_irq) {
 		wake_lock_init(&host->sdio_wlock, WAKE_LOCK_SUSPEND,
@@ -5415,7 +5486,7 @@ msmsdcc_probe(struct platform_device *pdev)
 		if (plat->status)
 			host->oldstat = plat->status(mmc_dev(host->mmc));
 		else
-			host->oldstat = msmsdcc_slot_status(host);
+			host->oldstat = msmsdcc_slot_status(host, true);
 
 		host->eject = !host->oldstat;
 	}
@@ -5865,13 +5936,17 @@ msmsdcc_runtime_suspend(struct device *dev)
 		 * the host so that any resume requests after this will
 		 * simple become pm usage counter increment operations.
 		 */
-		pm_runtime_get_noresume(dev);
-		/* If there is pending detect work abort runtime suspend */
-		if (unlikely(work_busy(&mmc->detect.work)))
-			rc = -EAGAIN;
-		else
-			rc = mmc_suspend_host(mmc);
-		pm_runtime_put_noidle(dev);
+		if (!mmc->card || (host->plat->sdiowakeup_irq &&
+		    mmc->card->type == MMC_TYPE_SDIO) ||
+		    mmc->card->type != MMC_TYPE_SDIO) {
+			pm_runtime_get_noresume(dev);
+			/* If there is pending detect work abort runtime suspend */
+			if (unlikely(work_busy(&mmc->detect.work)))
+				rc = -EAGAIN;
+			else
+				rc = mmc_suspend_host(mmc);
+			pm_runtime_put_noidle(dev);
+		}
 
 		if (!rc) {
 			spin_lock_irqsave(&host->lock, flags);
@@ -5884,7 +5959,14 @@ msmsdcc_runtime_suspend(struct device *dev)
 				 * to power off the card, atleast turn off
 				 * clocks to allow deep sleep (TCXO shutdown).
 				 */
-				msmsdcc_gate_clock(host);
+				mmc_host_clk_hold(mmc);
+				spin_lock_irqsave(&mmc->clk_lock, flags);
+				mmc->clk_old = mmc->ios.clock;
+				mmc->ios.clock = 0;
+				mmc->clk_gated = true;
+				spin_unlock_irqrestore(&mmc->clk_lock, flags);
+				mmc_set_ios(mmc);
+				mmc_host_clk_release(mmc);
 			}
 		}
 		host->sdcc_suspending = 0;
@@ -5913,10 +5995,16 @@ msmsdcc_runtime_resume(struct device *dev)
 	if (mmc) {
 		if (mmc->card && mmc_card_sdio(mmc->card) &&
 				mmc_card_keep_power(mmc)) {
-			msmsdcc_ungate_clock(host);
+			mmc_host_clk_hold(mmc);
+			mmc->ios.clock = host->clk_rate;
+			mmc_set_ios(mmc);
+			mmc_host_clk_release(mmc);
 		}
 
-		mmc_resume_host(mmc);
+		if (!mmc->card || (host->plat->sdiowakeup_irq &&
+		    mmc->card->type == MMC_TYPE_SDIO) ||
+		    mmc->card->type != MMC_TYPE_SDIO)
+			mmc_resume_host(mmc);
 
 		/*
 		 * FIXME: Clearing of flags must be handled in clients
