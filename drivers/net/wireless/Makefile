@@ -59,7 +59,11 @@ obj-$(CONFIG_IWM)	+= iwmc3200wifi/
 
 obj-$(CONFIG_MWIFIEX)	+= mwifiex/
 
+ifeq ($(CONFIG_VENDOR_XIAOMI),y)
+obj-$(CONFIG_BCMDHD)	+= bcmdhd-xiaomi/
+else
 obj-$(CONFIG_BCMDHD)	+= bcmdhd/
+endif
 
 obj-$(CONFIG_BRCMFMAC)	+= brcm80211/
 obj-$(CONFIG_BRCMSMAC)	+= brcm80211/
