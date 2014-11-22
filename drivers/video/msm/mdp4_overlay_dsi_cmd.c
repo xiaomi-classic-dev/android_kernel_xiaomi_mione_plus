@@ -269,6 +269,54 @@ static void mdp4_dsi_cmd_pipe_clean(struct vsync_update *vp)
 static void mdp4_dsi_cmd_blt_ov_update(struct mdp4_overlay_pipe *pipe);
 static int mdp4_dsi_cmd_clk_check(struct vsycn_ctrl *vctrl);
 
+void mdp4_dsi_cmd_wait_dma_ov(void)
+{
+	struct vsycn_ctrl *vctrl = NULL;
+	struct mdp4_overlay_pipe *pipe = NULL;
+	int need_dmap_wait = 0;
+	int need_ov_wait = 0;
+	unsigned long flags;
+
+	vctrl = &vsync_ctrl_db[0];
+
+	if (vctrl)
+		pipe = vctrl->base_pipe;
+
+	if (!pipe)
+		return;
+
+	spin_lock_irqsave(&vctrl->spin_lock, flags);
+	if (pipe->ov_blt_addr) {
+		/* Blt */
+		if (vctrl->blt_wait)
+			need_dmap_wait = 1;
+		if (vctrl->ov_koff != vctrl->ov_done) {
+			INIT_COMPLETION(vctrl->ov_comp);
+			need_ov_wait = 1;
+		}
+	} else {
+		/* direct out */
+		if (vctrl->dmap_koff != vctrl->dmap_done) {
+			INIT_COMPLETION(vctrl->dmap_comp);
+			pr_debug("%s: wait, ok=%d od=%d dk=%d dd=%d cpu=%d\n",
+					__func__, vctrl->ov_koff, vctrl->ov_done,
+					vctrl->dmap_koff, vctrl->dmap_done, smp_processor_id());
+			need_dmap_wait = 1;
+		}
+	}
+	spin_unlock_irqrestore(&vctrl->spin_lock, flags);
+
+	if (need_dmap_wait) {
+		pr_debug("%s: wait4dmap\n", __func__);
+		mdp4_dsi_cmd_wait4dmap(0);
+	}
+
+	if (need_ov_wait) {
+		pr_debug("%s: wait4ov\n", __func__);
+		mdp4_dsi_cmd_wait4ov(0);
+	}
+}
+
 int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 {
 	int  i, undx;
@@ -595,6 +643,8 @@ void mdp4_dmap_done_dsi_cmd(int cndx)
 		__func__, vctrl->ov_koff, vctrl->ov_done, vctrl->dmap_koff,
 		vctrl->dmap_done, smp_processor_id());
 	complete(&vctrl->dmap_comp);
+	if (mdp_rev <= MDP_REV_41)
+		mdp4_mixer_blend_cfg(MDP4_MIXER0);
 	if (diff <= 0) {
 		if (vctrl->blt_wait)
 			vctrl->blt_wait = 0;
@@ -1231,7 +1281,7 @@ void mdp4_dsi_cmd_overlay(struct msm_fb_data_type *mfd)
 	}
 
 	mdp4_overlay_mdp_perf_upd(mfd, 1);
-	mdp4_dsi_cmd_pipe_commit(cndx, 1);
+	mdp4_dsi_cmd_pipe_commit(cndx, 0);
 	mdp4_overlay_mdp_perf_upd(mfd, 0);
 	mutex_unlock(&mfd->dma->ov_mutex);
 
