@@ -617,6 +617,9 @@ int adreno_context_restore(struct adreno_device *adreno_dev,
 	cmds[3] = device->memstore.gpuaddr +
 		KGSL_MEMSTORE_OFFSET(KGSL_MEMSTORE_GLOBAL, current_context);
 	cmds[4] = context->base.id;
+	if (!adreno_is_a3xx(adreno_dev))
+		return adreno_ringbuffer_issuecmds(device, context,
+					KGSL_CMD_FLAGS_NONE, cmds, 5);
 	ret = adreno_ringbuffer_issuecmds(device, context, KGSL_CMD_FLAGS_NONE,
 					cmds, 5);
 	if (ret)
