@@ -68,6 +68,7 @@
 #include <net/dst.h>
 #include <net/checksum.h>
 #include <net/net_namespace.h>
+#include <net/tcp_states.h>
 
 struct cgroup;
 struct cgroup_subsys;
@@ -2139,9 +2140,18 @@ static inline struct sock *skb_steal_sock(struct sk_buff *skb)
 	return NULL;
 }
 
-extern void sock_enable_timestamp(struct sock *sk, int flag);
-extern int sock_get_timestamp(struct sock *, struct timeval __user *);
-extern int sock_get_timestampns(struct sock *, struct timespec __user *);
+/* This helper checks if a socket is a full socket,
+ * ie _not_ a timewait or request socket.
+ * TODO: Check for TCPF_NEW_SYN_RECV when that starts to exist.
+ */
+static inline bool sk_fullsock(const struct sock *sk)
+{
+	return (1 << sk->sk_state) & ~(TCPF_TIME_WAIT);
+}
+
+void sock_enable_timestamp(struct sock *sk, int flag);
+int sock_get_timestamp(struct sock *, struct timeval __user *);
+int sock_get_timestampns(struct sock *, struct timespec __user *);
 
 /* 
  *	Enable debug/info messages 
