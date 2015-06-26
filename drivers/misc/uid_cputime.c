@@ -90,6 +90,9 @@ static int uid_stat_show(struct seq_file *m, void *v)
 
 	read_lock(&tasklist_lock);
 	do_each_thread(temp, task) {
+		/* Exited threads are already included in the saved totals. */
+		if (task->uid_cputime_accounted)
+			continue;
 		uid_entry = find_or_register_uid(task_uid(task));
 		if (!uid_entry) {
 			read_unlock(&tasklist_lock);
@@ -196,6 +199,8 @@ static int process_notifier(struct notifier_block *self,
 		return NOTIFY_OK;
 
 	mutex_lock(&uid_lock);
+	if (task->uid_cputime_accounted)
+		goto exit;
 	uid = task_uid(task);
 	uid_entry = find_or_register_uid(uid);
 	if (!uid_entry) {
@@ -206,6 +211,7 @@ static int process_notifier(struct notifier_block *self,
 	task_times(task, &utime, &stime);
 	uid_entry->utime += utime;
 	uid_entry->stime += stime;
+	task->uid_cputime_accounted = 1;
 
 exit:
 	mutex_unlock(&uid_lock);
