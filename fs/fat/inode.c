@@ -1105,7 +1105,8 @@ static int parse_options(struct super_block *sb, char *options, int is_vfat,
 		case Opt_time_offset:
 			if (match_int(&args[0], &option))
 				return 0;
-			if (option < -12 * 60 || option > 12 * 60)
+			/* Allow unusual time zones and their DST corrections. */
+			if (option < -24 * 60 || option > 24 * 60)
 				return 0;
 			opts->tz_set = 1;
 			opts->time_offset = option;
