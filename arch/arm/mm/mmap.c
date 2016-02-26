@@ -261,7 +261,7 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 
 	if ((current->flags & PF_RANDOMIZE) &&
 	    !(current->personality & ADDR_NO_RANDOMIZE))
-		random_factor = (get_random_int() &
+		random_factor = (get_random_long() &
 				 ((1UL << mmap_rnd_bits) - 1)) << PAGE_SHIFT;
 
 	if (mmap_is_legacy()) {
