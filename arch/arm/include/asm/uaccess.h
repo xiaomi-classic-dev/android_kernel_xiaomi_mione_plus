@@ -35,8 +35,7 @@
  * on our cache or tlb entries.
  */
 
-struct exception_table_entry
-{
+struct exception_table_entry {
 	unsigned long insn, fixup;
 };
 
@@ -101,28 +100,39 @@ extern int __get_user_1(void *);
 extern int __get_user_2(void *);
 extern int __get_user_4(void *);
 
-#define __get_user_x(__r2,__p,__e,__s,__i...)				\
+#define __GUP_CLOBBER_1	"lr", "cc"
+#ifdef CONFIG_CPU_USE_DOMAINS
+#define __GUP_CLOBBER_2	"ip", "lr", "cc"
+#else
+#define __GUP_CLOBBER_2 "lr", "cc"
+#endif
+#define __GUP_CLOBBER_4	"lr", "cc"
+
+#define __get_user_x(__r2, __p, __e, __l, __s)				\
 	   __asm__ __volatile__ (					\
 		__asmeq("%0", "r0") __asmeq("%1", "r2")			\
+		__asmeq("%3", "r1")					\
 		"bl	__get_user_" #__s				\
 		: "=&r" (__e), "=r" (__r2)				\
-		: "0" (__p)						\
-		: __i, "cc")
+		: "0" (__p), "r" (__l)					\
+		: __GUP_CLOBBER_##__s)
 
 #define get_user(x,p)							\
 	({								\
+		unsigned long __limit = current_thread_info()->addr_limit - 1; \
 		register const typeof(*(p)) __user *__p asm("r0") = (p);\
 		register unsigned long __r2 asm("r2");			\
+		register unsigned long __l asm("r1") = __limit;		\
 		register int __e asm("r0");				\
 		switch (sizeof(*(__p))) {				\
 		case 1:							\
-			__get_user_x(__r2, __p, __e, 1, "lr");		\
-	       		break;						\
+			__get_user_x(__r2, __p, __e, __l, 1);		\
+			break;						\
 		case 2:							\
-			__get_user_x(__r2, __p, __e, 2, "r3", "lr");	\
+			__get_user_x(__r2, __p, __e, __l, 2);		\
 			break;						\
 		case 4:							\
-	       		__get_user_x(__r2, __p, __e, 4, "lr");		\
+			__get_user_x(__r2, __p, __e, __l, 4);		\
 			break;						\
 		default: __e = __get_user_bad(); break;			\
 		}							\
@@ -135,31 +145,34 @@ extern int __put_user_2(void *, unsigned int);
 extern int __put_user_4(void *, unsigned int);
 extern int __put_user_8(void *, unsigned long long);
 
-#define __put_user_x(__r2,__p,__e,__s)					\
+#define __put_user_x(__r2, __p, __e, __l, __s)				\
 	   __asm__ __volatile__ (					\
 		__asmeq("%0", "r0") __asmeq("%2", "r2")			\
+		__asmeq("%3", "r1")					\
 		"bl	__put_user_" #__s				\
 		: "=&r" (__e)						\
-		: "0" (__p), "r" (__r2)					\
+		: "0" (__p), "r" (__r2), "r" (__l)			\
 		: "ip", "lr", "cc")
 
 #define put_user(x,p)							\
 	({								\
+		unsigned long __limit = current_thread_info()->addr_limit - 1; \
 		register const typeof(*(p)) __r2 asm("r2") = (x);	\
 		register const typeof(*(p)) __user *__p asm("r0") = (p);\
+		register unsigned long __l asm("r1") = __limit;		\
 		register int __e asm("r0");				\
 		switch (sizeof(*(__p))) {				\
 		case 1:							\
-			__put_user_x(__r2, __p, __e, 1);		\
+			__put_user_x(__r2, __p, __e, __l, 1);		\
 			break;						\
 		case 2:							\
-			__put_user_x(__r2, __p, __e, 2);		\
+			__put_user_x(__r2, __p, __e, __l, 2);		\
 			break;						\
 		case 4:							\
-			__put_user_x(__r2, __p, __e, 4);		\
+			__put_user_x(__r2, __p, __e, __l, 4);		\
 			break;						\
 		case 8:							\
-			__put_user_x(__r2, __p, __e, 8);		\
+			__put_user_x(__r2, __p, __e, __l, 8);		\
 			break;						\
 		default: __e = __put_user_bad(); break;			\
 		}							\
@@ -385,32 +398,45 @@ do {									\
 	: "r" (x), "i" (-EFAULT)				\
 	: "cc")
 
-
 #ifdef CONFIG_MMU
-extern unsigned long __must_check __copy_from_user(void *to, const void __user *from, unsigned long n);
-extern unsigned long __must_check __copy_to_user(void __user *to, const void *from, unsigned long n);
-extern unsigned long __must_check __copy_to_user_std(void __user *to, const void *from, unsigned long n);
-extern unsigned long __must_check __clear_user(void __user *addr, unsigned long n);
-extern unsigned long __must_check __clear_user_std(void __user *addr, unsigned long n);
+extern unsigned long __must_check __copy_from_user(void *to,
+						   const void __user *from,
+						   unsigned long n);
+extern unsigned long __must_check __copy_to_user(void __user *to,
+						 const void *from,
+						 unsigned long n);
+extern unsigned long __must_check __copy_to_user_std(void __user *to,
+						     const void *from,
+						     unsigned long n);
+extern unsigned long __must_check __clear_user(void __user *addr,
+					       unsigned long n);
+extern unsigned long __must_check __clear_user_std(void __user *addr,
+						   unsigned long n);
 #else
 #define __copy_from_user(to,from,n)	(memcpy(to, (void __force *)from, n), 0)
 #define __copy_to_user(to,from,n)	(memcpy((void __force *)to, from, n), 0)
 #define __clear_user(addr,n)		(memset((void __force *)addr, 0, n), 0)
 #endif
 
-extern unsigned long __must_check __strncpy_from_user(char *to, const char __user *from, unsigned long count);
+extern unsigned long __must_check __strncpy_from_user(char *to,
+						      const char __user *from,
+						      unsigned long count);
 extern unsigned long __must_check __strnlen_user(const char __user *s, long n);
 
-static inline unsigned long __must_check copy_from_user(void *to, const void __user *from, unsigned long n)
+static inline unsigned long __must_check copy_from_user(void *to,
+							const void __user *from,
+							unsigned long n)
 {
 	if (access_ok(VERIFY_READ, from, n))
 		n = __copy_from_user(to, from, n);
-	else /* security hole - plug it */
+	else			/* security hole - plug it */
 		memset(to, 0, n);
 	return n;
 }
 
-static inline unsigned long __must_check copy_to_user(void __user *to, const void *from, unsigned long n)
+static inline unsigned long __must_check copy_to_user(void __user *to,
+						      const void *from,
+						      unsigned long n)
 {
 	if (access_ok(VERIFY_WRITE, to, n))
 		n = __copy_to_user(to, from, n);
@@ -420,14 +446,17 @@ static inline unsigned long __must_check copy_to_user(void __user *to, const voi
 #define __copy_to_user_inatomic __copy_to_user
 #define __copy_from_user_inatomic __copy_from_user
 
-static inline unsigned long __must_check clear_user(void __user *to, unsigned long n)
+static inline unsigned long __must_check clear_user(void __user *to,
+						    unsigned long n)
 {
 	if (access_ok(VERIFY_WRITE, to, n))
 		n = __clear_user(to, n);
 	return n;
 }
 
-static inline long __must_check strncpy_from_user(char *dst, const char __user *src, long count)
+static inline long __must_check strncpy_from_user(char *dst,
+						  const char __user *src,
+						  long count)
 {
 	long res = -EFAULT;
 	if (access_ok(VERIFY_READ, src, 1))

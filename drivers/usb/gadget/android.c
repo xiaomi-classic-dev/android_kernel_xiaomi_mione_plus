@@ -588,8 +588,7 @@ static ssize_t clients_store(
 }
 
 static DEVICE_ATTR(clients, S_IWUSR, NULL, clients_store);
-static struct device_attribute *diag_function_attributes[] =
-					 { &dev_attr_clients, NULL };
+static struct device_attribute *diag_function_attributes[] = { &dev_attr_clients, NULL };
 
 static int diag_function_init(struct android_usb_function *f,
 				 struct usb_composite_dev *cdev)
@@ -650,8 +649,7 @@ static ssize_t serial_transports_store(
 }
 
 static DEVICE_ATTR(transports, S_IWUSR, NULL, serial_transports_store);
-static struct device_attribute *serial_function_attributes[] =
-					 { &dev_attr_transports, NULL };
+static struct device_attribute *serial_function_attributes[] = { &dev_attr_transports, NULL };
 
 static void serial_function_cleanup(struct android_usb_function *f)
 {
@@ -664,7 +662,7 @@ static int serial_function_bind_config(struct android_usb_function *f,
 	char *name;
 	char buf[32], *b;
 	int err = -1, i;
-	static int serial_initialized = 0, ports = 0;
+	static int serial_initialized, ports;
 
 	if (serial_initialized)
 		goto bind_config;
