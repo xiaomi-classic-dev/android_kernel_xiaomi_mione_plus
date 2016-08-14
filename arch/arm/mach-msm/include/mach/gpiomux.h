@@ -173,5 +173,6 @@ static inline int msm_gpiomux_write(unsigned gpio,
 {
 	return -ENOSYS;
 }
+
 #endif
 #endif

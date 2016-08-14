@@ -17,6 +17,7 @@
 #include <linux/irq.h>
 #include <linux/io.h>
 #include <linux/msm_ssbi.h>
+#include <linux/mfd/pm8xxx/gpio.h>
 #include <linux/mfd/pmic8058.h>
 
 #include <linux/leds.h>
@@ -36,9 +37,20 @@
 #include <linux/input/tdisc_shinetsu.h>
 #include <linux/input/cy8c_ts.h>
 #include <linux/cyttsp-qc.h>
+#include <../drivers/staging/ste_rmi4/synaptics_i2c_rmi4.h>
+#include <linux/i2c/atmel_mxt_ts.h>
+#include <linux/rmi.h>
+#include <linux/input/ft5x0x_ts.h>
 #include <linux/i2c/isa1200.h>
 #include <linux/dma-mapping.h>
 #include <linux/i2c/bq27520.h>
+#include <linux/input/hmc5883l.h>
+#include <linux/input/isl29028.h>
+#include <linux/input/lis3dh.h>
+#include <linux/input/lsm303d.h>
+#include <linux/input/bmc055.h>
+#include <linux/proc_fs.h>
+#include <linux/clk.h>
 
 #ifdef CONFIG_ANDROID_PMEM
 #include <linux/android_pmem.h>
@@ -61,6 +73,7 @@
 #include <mach/msm_spi.h>
 #include <mach/msm_serial_hs.h>
 #include <mach/msm_serial_hs_lite.h>
+#include <mach/bcm_bt_lpm.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_memtypes.h>
 #include <asm/mach/mmc.h>
@@ -86,6 +99,15 @@
 #include <mach/restart.h>
 #include <mach/board-msm8660.h>
 #include <mach/iommu_domains.h>
+#if defined(CONFIG_LEDS_LM3530)
+#include <linux/led-lm3530.h>
+#endif
+#ifdef CONFIG_LEDS_LM3554
+#include <linux/led-flash-lm3554.h>
+#endif
+#ifdef CONFIG_BATTERY_MAX17043
+#include <linux/max17043_battery.h>
+#endif
 
 #include "devices.h"
 #include "devices-msm8x60.h"
@@ -102,6 +124,7 @@
 #include "rpm_resources.h"
 #include "pm-boot.h"
 #include "board-storage-common-a.h"
+#include "board-xiaomi.h"
 
 #include <linux/ion.h>
 #include <mach/ion.h>
@@ -135,14 +158,14 @@ static struct platform_device ion_dev;
 #endif
 
 enum {
-	GPIO_EXPANDER_IRQ_BASE  = PM8901_IRQ_BASE + NR_PMIC8901_IRQS,
+	GPIO_EXPANDER_IRQ_BASE = PM8901_IRQ_BASE + NR_PMIC8901_IRQS,
 	GPIO_EXPANDER_GPIO_BASE = PM8901_MPP_BASE + PM8901_MPPS,
 	/* CORE expander */
 	GPIO_CORE_EXPANDER_BASE = GPIO_EXPANDER_GPIO_BASE,
-	GPIO_CLASS_D1_EN        = GPIO_CORE_EXPANDER_BASE,
+	GPIO_CLASS_D1_EN = GPIO_CORE_EXPANDER_BASE,
 	GPIO_WLAN_DEEP_SLEEP_N,
 	GPIO_LVDS_SHUTDOWN_N,
-	GPIO_DISP_RESX_N        = GPIO_LVDS_SHUTDOWN_N,
+	GPIO_DISP_RESX_N = GPIO_LVDS_SHUTDOWN_N,
 	GPIO_MS_SYS_RESET_N,
 	GPIO_CAP_TS_RESOUT_N,
 	GPIO_CAP_GAUGE_BI_TOUT,
@@ -158,7 +181,7 @@ enum {
 	GPIO_BATT_GAUGE_EN,
 	/* DOCKING expander */
 	GPIO_DOCKING_EXPANDER_BASE = GPIO_EXPANDER_GPIO_BASE + 16,
-	GPIO_MIPI_DSI_RST_N        = GPIO_DOCKING_EXPANDER_BASE,
+	GPIO_MIPI_DSI_RST_N = GPIO_DOCKING_EXPANDER_BASE,
 	GPIO_AUX_JTAG_DET_N,
 	GPIO_DONGLE_DET_N,
 	GPIO_SVIDEO_LOAD_DET,
@@ -176,7 +199,7 @@ enum {
 	GPIO_TP_EXP2_IO15,
 	/* SURF expander */
 	GPIO_SURF_EXPANDER_BASE = GPIO_EXPANDER_GPIO_BASE + (16 * 2),
-	GPIO_SD_CARD_DET_1      = GPIO_SURF_EXPANDER_BASE,
+	GPIO_SD_CARD_DET_1 = GPIO_SURF_EXPANDER_BASE,
 	GPIO_SD_CARD_DET_2,
 	GPIO_SD_CARD_DET_4,
 	GPIO_SD_CARD_DET_5,
@@ -194,7 +217,7 @@ enum {
 	GPIO_SURF_EXPANDER_IO15,
 	/* LEFT KB IO expander */
 	GPIO_LEFT_KB_EXPANDER_BASE = GPIO_EXPANDER_GPIO_BASE + (16 * 3),
-	GPIO_LEFT_LED_1            = GPIO_LEFT_KB_EXPANDER_BASE,
+	GPIO_LEFT_LED_1 = GPIO_LEFT_KB_EXPANDER_BASE,
 	GPIO_LEFT_LED_2,
 	GPIO_LEFT_LED_3,
 	GPIO_LEFT_LED_WLAN,
@@ -204,7 +227,7 @@ enum {
 	GPIO_LEFT_LED_5,
 	/* RIGHT KB IO expander */
 	GPIO_RIGHT_KB_EXPANDER_BASE = GPIO_EXPANDER_GPIO_BASE + (16 * 3) + 8,
-	GPIO_RIGHT_LED_1            = GPIO_RIGHT_KB_EXPANDER_BASE,
+	GPIO_RIGHT_LED_1 = GPIO_RIGHT_KB_EXPANDER_BASE,
 	GPIO_RIGHT_LED_2,
 	GPIO_RIGHT_LED_3,
 	GPIO_RIGHT_LED_BT,
@@ -255,8 +278,8 @@ enum {
 };
 
 struct pm8xxx_mpp_init_info {
-	unsigned			mpp;
-	struct pm8xxx_mpp_config_data	config;
+	unsigned mpp;
+	struct pm8xxx_mpp_config_data config;
 };
 
 #define PM8058_MPP_INIT(_mpp, _type, _level, _control) \
@@ -294,129 +317,129 @@ corresponds to GPIO 18 on PMIC 8058.
 #define FM_GPIO 17
 
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
-static void (*sdc2_status_notify_cb)(int card_present, void *dev_id);
+static void (*sdc2_status_notify_cb) (int card_present, void *dev_id);
 static void *sdc2_status_notify_cb_devid;
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC5_SUPPORT
-static void (*sdc5_status_notify_cb)(int card_present, void *dev_id);
+static void (*sdc5_status_notify_cb) (int card_present, void *dev_id);
 static void *sdc5_status_notify_cb_devid;
 #endif
 
 static struct msm_spm_platform_data msm_spm_data_v1[] __initdata = {
 	[0] = {
-		.reg_base_addr = MSM_SAW0_BASE,
+	       .reg_base_addr = MSM_SAW0_BASE,
 
 #ifdef CONFIG_MSM_AVS_HW
-		.reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
+	       .reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
 #endif
-		.reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x0F,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0xFFFFFFFF,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0xFFFFFFFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x0F,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0xFFFFFFFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0xFFFFFFFF,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x01,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x01,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
 
-		.awake_vlevel = 0x94,
-		.retention_vlevel = 0x81,
-		.collapse_vlevel = 0x20,
-		.retention_mid_vlevel = 0x94,
-		.collapse_mid_vlevel = 0x8C,
+	       .awake_vlevel = 0x94,
+	       .retention_vlevel = 0x81,
+	       .collapse_vlevel = 0x20,
+	       .retention_mid_vlevel = 0x94,
+	       .collapse_mid_vlevel = 0x8C,
 
-		.vctl_timeout_us = 50,
-	},
+	       .vctl_timeout_us = 50,
+	       },
 
 	[1] = {
-		.reg_base_addr = MSM_SAW1_BASE,
+	       .reg_base_addr = MSM_SAW1_BASE,
 
 #ifdef CONFIG_MSM_AVS_HW
-		.reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
+	       .reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
 #endif
-		.reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x0F,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0xFFFFFFFF,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0xFFFFFFFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x0F,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0xFFFFFFFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0xFFFFFFFF,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x13,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x13,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
 
-		.awake_vlevel = 0x94,
-		.retention_vlevel = 0x81,
-		.collapse_vlevel = 0x20,
-		.retention_mid_vlevel = 0x94,
-		.collapse_mid_vlevel = 0x8C,
+	       .awake_vlevel = 0x94,
+	       .retention_vlevel = 0x81,
+	       .collapse_vlevel = 0x20,
+	       .retention_mid_vlevel = 0x94,
+	       .collapse_mid_vlevel = 0x8C,
 
-		.vctl_timeout_us = 50,
-	},
+	       .vctl_timeout_us = 50,
+	       },
 };
 
 static struct msm_spm_platform_data msm_spm_data[] __initdata = {
 	[0] = {
-		.reg_base_addr = MSM_SAW0_BASE,
+	       .reg_base_addr = MSM_SAW0_BASE,
 
 #ifdef CONFIG_MSM_AVS_HW
-		.reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
+	       .reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
 #endif
-		.reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x1C,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0x0C0CFFFF,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0x78780FFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x1C,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0x0C0CFFFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0x78780FFF,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x01,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x01,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
 
-		.awake_vlevel = 0xA0,
-		.retention_vlevel = 0x89,
-		.collapse_vlevel = 0x20,
-		.retention_mid_vlevel = 0x89,
-		.collapse_mid_vlevel = 0x89,
+	       .awake_vlevel = 0xA0,
+	       .retention_vlevel = 0x89,
+	       .collapse_vlevel = 0x20,
+	       .retention_mid_vlevel = 0x89,
+	       .collapse_mid_vlevel = 0x89,
 
-		.vctl_timeout_us = 50,
-	},
+	       .vctl_timeout_us = 50,
+	       },
 
 	[1] = {
-		.reg_base_addr = MSM_SAW1_BASE,
+	       .reg_base_addr = MSM_SAW1_BASE,
 
 #ifdef CONFIG_MSM_AVS_HW
-		.reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
+	       .reg_init_values[MSM_SPM_REG_SAW_AVS_CTL] = 0x586020FF,
 #endif
-		.reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x1C,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0x0C0CFFFF,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0x78780FFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_CFG] = 0x1C,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_CTL] = 0x68,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_SLP_TMR_DLY] = 0x0C0CFFFF,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_WAKE_TMR_DLY] = 0x78780FFF,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x13,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLK_EN] = 0x13,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_PRECLMP_EN] = 0x07,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_HSFS_POSTCLMP_EN] = 0x00,
 
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
-		.reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
-		.reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_CLMP_EN] = 0x01,
+	       .reg_init_values[MSM_SPM_REG_SAW_SLP_RST_EN] = 0x00,
+	       .reg_init_values[MSM_SPM_REG_SAW_SPM_MPM_CFG] = 0x00,
 
-		.awake_vlevel = 0xA0,
-		.retention_vlevel = 0x89,
-		.collapse_vlevel = 0x20,
-		.retention_mid_vlevel = 0x89,
-		.collapse_mid_vlevel = 0x89,
+	       .awake_vlevel = 0xA0,
+	       .retention_vlevel = 0x89,
+	       .collapse_vlevel = 0x20,
+	       .retention_mid_vlevel = 0x89,
+	       .collapse_mid_vlevel = 0x89,
 
-		.vctl_timeout_us = 50,
-	},
+	       .vctl_timeout_us = 50,
+	       },
 };
 
 /*
@@ -424,48 +447,49 @@ static struct msm_spm_platform_data msm_spm_data[] __initdata = {
  *			 regulator name		consumer dev_name
  */
 static struct regulator_consumer_supply vreg_consumers_8901_S0[] = {
-	REGULATOR_SUPPLY("8901_s0",		NULL),
+	REGULATOR_SUPPLY("8901_s0", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_8901_S1[] = {
-	REGULATOR_SUPPLY("8901_s1",		NULL),
+	REGULATOR_SUPPLY("8901_s1", NULL),
 };
 
 static struct regulator_init_data saw_s0_init_data = {
-		.constraints = {
+	.constraints = {
 			.name = "8901_s0",
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
 			.min_uV = 800000,
 			.max_uV = 1325000,
-		},
-		.consumer_supplies = vreg_consumers_8901_S0,
-		.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S0),
+			},
+	.consumer_supplies = vreg_consumers_8901_S0,
+	.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S0),
 };
 
 static struct regulator_init_data saw_s1_init_data = {
-		.constraints = {
+	.constraints = {
 			.name = "8901_s1",
 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
 			.min_uV = 800000,
 			.max_uV = 1325000,
-		},
-		.consumer_supplies = vreg_consumers_8901_S1,
-		.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S1),
+			},
+	.consumer_supplies = vreg_consumers_8901_S1,
+	.num_consumer_supplies = ARRAY_SIZE(vreg_consumers_8901_S1),
 };
 
 static struct platform_device msm_device_saw_s0 = {
-	.name          = "saw-regulator",
-	.id            = 0,
-	.dev           = {
+	.name = "saw-regulator",
+	.id = 0,
+	.dev = {
 		.platform_data = &saw_s0_init_data,
-	},
+		},
 };
 
 static struct platform_device msm_device_saw_s1 = {
-	.name          = "saw-regulator",
-	.id            = 1,
-	.dev           = {
+	.name = "saw-regulator",
+	.id = 1,
+	.dev = {
 		.platform_data = &saw_s1_init_data,
-	},
+		},
 };
 
 /*
@@ -474,47 +498,45 @@ static struct platform_device msm_device_saw_s1 = {
  */
 static struct resource smc91x_resources[] = {
 	[0] = {
-		.flags = IORESOURCE_MEM,
-	},
+	       .flags = IORESOURCE_MEM,
+	       },
 	[1] = {
-		.flags = IORESOURCE_IRQ,
-	},
+	       .flags = IORESOURCE_IRQ,
+	       },
 };
 
 static struct platform_device smc91x_device = {
-	.name          = "smc91x",
-	.id            = 0,
+	.name = "smc91x",
+	.id = 0,
 	.num_resources = ARRAY_SIZE(smc91x_resources),
-	.resource      = smc91x_resources,
+	.resource = smc91x_resources,
 };
 
 static struct resource smsc911x_resources[] = {
 	[0] = {
-		.flags = IORESOURCE_MEM,
-		.start = 0x1b800000,
-		.end   = 0x1b8000ff
-	},
+	       .flags = IORESOURCE_MEM,
+	       .start = 0x1b800000,
+	       .end = 0x1b8000ff},
 	[1] = {
-		.flags = IORESOURCE_IRQ | IORESOURCE_IRQ_LOWLEVEL,
-	},
+	       .flags = IORESOURCE_IRQ | IORESOURCE_IRQ_LOWLEVEL,
+	       },
 };
 
 static struct smsc911x_platform_config smsc911x_config = {
-	.irq_polarity	= SMSC911X_IRQ_POLARITY_ACTIVE_LOW,
-	.irq_type	= SMSC911X_IRQ_TYPE_PUSH_PULL,
-	.flags		= SMSC911X_USE_16BIT,
-	.has_reset_gpio	= 1,
-	.reset_gpio	= GPIO_ETHERNET_RESET_N
+	.irq_polarity = SMSC911X_IRQ_POLARITY_ACTIVE_LOW,
+	.irq_type = SMSC911X_IRQ_TYPE_PUSH_PULL,
+	.flags = SMSC911X_USE_16BIT,
+	.has_reset_gpio = 1,
+	.reset_gpio = GPIO_ETHERNET_RESET_N
 };
 
 static struct platform_device smsc911x_device = {
-	.name          = "smsc911x",
-	.id            = 0,
+	.name = "smsc911x",
+	.id = 0,
 	.num_resources = ARRAY_SIZE(smsc911x_resources),
-	.resource      = smsc911x_resources,
-	.dev           = {
-		.platform_data = &smsc911x_config
-	}
+	.resource = smsc911x_resources,
+	.dev = {
+		.platform_data = &smsc911x_config}
 };
 
 #if defined(CONFIG_CRYPTO_DEV_QCRYPTO) || \
@@ -532,66 +554,66 @@ static struct platform_device smsc911x_device = {
 
 static struct resource qcrypto_resources[] = {
 	[0] = {
-		.start = QCE_0_BASE,
-		.end = QCE_0_BASE + QCE_SIZE - 1,
-		.flags = IORESOURCE_MEM,
-	},
+	       .start = QCE_0_BASE,
+	       .end = QCE_0_BASE + QCE_SIZE - 1,
+	       .flags = IORESOURCE_MEM,
+	       },
 	[1] = {
-		.name = "crypto_channels",
-		.start = DMOV_CE_IN_CHAN,
-		.end = DMOV_CE_OUT_CHAN,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_channels",
+	       .start = DMOV_CE_IN_CHAN,
+	       .end = DMOV_CE_OUT_CHAN,
+	       .flags = IORESOURCE_DMA,
+	       },
 	[2] = {
-		.name = "crypto_crci_in",
-		.start = DMOV_CE_IN_CRCI,
-		.end = DMOV_CE_IN_CRCI,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_crci_in",
+	       .start = DMOV_CE_IN_CRCI,
+	       .end = DMOV_CE_IN_CRCI,
+	       .flags = IORESOURCE_DMA,
+	       },
 	[3] = {
-		.name = "crypto_crci_out",
-		.start = DMOV_CE_OUT_CRCI,
-		.end = DMOV_CE_OUT_CRCI,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_crci_out",
+	       .start = DMOV_CE_OUT_CRCI,
+	       .end = DMOV_CE_OUT_CRCI,
+	       .flags = IORESOURCE_DMA,
+	       },
 	[4] = {
-		.name = "crypto_crci_hash",
-		.start = DMOV_CE_HASH_CRCI,
-		.end = DMOV_CE_HASH_CRCI,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_crci_hash",
+	       .start = DMOV_CE_HASH_CRCI,
+	       .end = DMOV_CE_HASH_CRCI,
+	       .flags = IORESOURCE_DMA,
+	       },
 };
 
 static struct resource qcedev_resources[] = {
 	[0] = {
-		.start = QCE_0_BASE,
-		.end = QCE_0_BASE + QCE_SIZE - 1,
-		.flags = IORESOURCE_MEM,
-	},
+	       .start = QCE_0_BASE,
+	       .end = QCE_0_BASE + QCE_SIZE - 1,
+	       .flags = IORESOURCE_MEM,
+	       },
 	[1] = {
-		.name = "crypto_channels",
-		.start = DMOV_CE_IN_CHAN,
-		.end = DMOV_CE_OUT_CHAN,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_channels",
+	       .start = DMOV_CE_IN_CHAN,
+	       .end = DMOV_CE_OUT_CHAN,
+	       .flags = IORESOURCE_DMA,
+	       },
 	[2] = {
-		.name = "crypto_crci_in",
-		.start = DMOV_CE_IN_CRCI,
-		.end = DMOV_CE_IN_CRCI,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_crci_in",
+	       .start = DMOV_CE_IN_CRCI,
+	       .end = DMOV_CE_IN_CRCI,
+	       .flags = IORESOURCE_DMA,
+	       },
 	[3] = {
-		.name = "crypto_crci_out",
-		.start = DMOV_CE_OUT_CRCI,
-		.end = DMOV_CE_OUT_CRCI,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_crci_out",
+	       .start = DMOV_CE_OUT_CRCI,
+	       .end = DMOV_CE_OUT_CRCI,
+	       .flags = IORESOURCE_DMA,
+	       },
 	[4] = {
-		.name = "crypto_crci_hash",
-		.start = DMOV_CE_HASH_CRCI,
-		.end = DMOV_CE_HASH_CRCI,
-		.flags = IORESOURCE_DMA,
-	},
+	       .name = "crypto_crci_hash",
+	       .start = DMOV_CE_HASH_CRCI,
+	       .end = DMOV_CE_HASH_CRCI,
+	       .flags = IORESOURCE_DMA,
+	       },
 };
 
 #endif
@@ -608,14 +630,14 @@ static struct msm_ce_hw_support qcrypto_ce_hw_suppport = {
 };
 
 static struct platform_device qcrypto_device = {
-	.name		= "qcrypto",
-	.id		= 0,
-	.num_resources	= ARRAY_SIZE(qcrypto_resources),
-	.resource	= qcrypto_resources,
-	.dev		= {
+	.name = "qcrypto",
+	.id = 0,
+	.num_resources = ARRAY_SIZE(qcrypto_resources),
+	.resource = qcrypto_resources,
+	.dev = {
 		.coherent_dma_mask = DMA_BIT_MASK(32),
 		.platform_data = &qcrypto_ce_hw_suppport,
-	},
+		},
 };
 #endif
 
@@ -631,258 +653,152 @@ static struct msm_ce_hw_support qcedev_ce_hw_suppport = {
 };
 
 static struct platform_device qcedev_device = {
-	.name		= "qce",
-	.id		= 0,
-	.num_resources	= ARRAY_SIZE(qcedev_resources),
-	.resource	= qcedev_resources,
-	.dev		= {
+	.name = "qce",
+	.id = 0,
+	.num_resources = ARRAY_SIZE(qcedev_resources),
+	.resource = qcedev_resources,
+	.dev = {
 		.coherent_dma_mask = DMA_BIT_MASK(32),
 		.platform_data = &qcedev_ce_hw_suppport,
-	},
+		},
 };
 #endif
 
 #if defined(CONFIG_HAPTIC_ISA1200) || \
 		defined(CONFIG_HAPTIC_ISA1200_MODULE)
+#define GPIO_HAP_LENABLE   24	/* HAPTIC_LEN */
+#define GPIO_HAP_HENABLE   25	/* HAPTIC_HEN */
 
-static const char *vregs_isa1200_name[] = {
-	"8058_s3",
-	"8901_l4",
-};
-
-static const int vregs_isa1200_val[] = {
-	1800000,/* uV */
-	2600000,
-};
-static struct regulator *vregs_isa1200[ARRAY_SIZE(vregs_isa1200_name)];
-static struct msm_xo_voter *xo_handle_a1;
-
-static int isa1200_power(int vreg_on)
-{
-	int i, rc = 0;
-
-	for (i = 0; i < ARRAY_SIZE(vregs_isa1200_name); i++) {
-		rc = vreg_on ? regulator_enable(vregs_isa1200[i]) :
-			regulator_disable(vregs_isa1200[i]);
-		if (rc < 0) {
-			pr_err("%s: vreg %s %s failed (%d)\n",
-				__func__, vregs_isa1200_name[i],
-				vreg_on ? "enable" : "disable", rc);
-			goto vreg_fail;
-		}
-	}
-
-	rc = vreg_on ? msm_xo_mode_vote(xo_handle_a1, MSM_XO_MODE_ON) :
-			msm_xo_mode_vote(xo_handle_a1, MSM_XO_MODE_OFF);
-	if (rc < 0) {
-		pr_err("%s: failed to %svote for TCXO A1 buffer%d\n",
-				__func__, vreg_on ? "" : "de-", rc);
-		goto vreg_fail;
-	}
-	return 0;
-
-vreg_fail:
-	while (i--)
-		!vreg_on ? regulator_enable(vregs_isa1200[i]) :
-			regulator_disable(vregs_isa1200[i]);
-	return rc;
-}
-
-static int isa1200_dev_setup(bool enable)
-{
-	int i, rc;
-
-	if (enable == true) {
-		for (i = 0; i < ARRAY_SIZE(vregs_isa1200_name); i++) {
-			vregs_isa1200[i] = regulator_get(NULL,
-						vregs_isa1200_name[i]);
-			if (IS_ERR(vregs_isa1200[i])) {
-				pr_err("%s: regulator get of %s failed (%ld)\n",
-					__func__, vregs_isa1200_name[i],
-					PTR_ERR(vregs_isa1200[i]));
-				rc = PTR_ERR(vregs_isa1200[i]);
-				goto vreg_get_fail;
-			}
-			rc = regulator_set_voltage(vregs_isa1200[i],
-				vregs_isa1200_val[i], vregs_isa1200_val[i]);
-			if (rc) {
-				pr_err("%s: regulator_set_voltage(%s) failed\n",
-					__func__, vregs_isa1200_name[i]);
-				goto vreg_get_fail;
-			}
-		}
-
-		rc = gpio_request(GPIO_HAP_SHIFT_LVL_OE, "haptics_shft_lvl_oe");
-		if (rc) {
-			pr_err("%s: unable to request gpio %d (%d)\n",
-					__func__, GPIO_HAP_SHIFT_LVL_OE, rc);
-			goto vreg_get_fail;
-		}
-
-		rc = gpio_direction_output(GPIO_HAP_SHIFT_LVL_OE, 1);
-		if (rc) {
-			pr_err("%s: Unable to set direction\n", __func__);;
-			goto free_gpio;
-		}
-
-		xo_handle_a1 = msm_xo_get(MSM_XO_TCXO_A1, "isa1200");
-		if (IS_ERR(xo_handle_a1)) {
-			rc = PTR_ERR(xo_handle_a1);
-			pr_err("%s: failed to get the handle for A1(%d)\n",
-							__func__, rc);
-			goto gpio_set_dir;
-		}
-	} else {
-		gpio_set_value(GPIO_HAP_SHIFT_LVL_OE, 0);
-		gpio_free(GPIO_HAP_SHIFT_LVL_OE);
-
-		for (i = 0; i < ARRAY_SIZE(vregs_isa1200_name); i++)
-			regulator_put(vregs_isa1200[i]);
-
-		msm_xo_put(xo_handle_a1);
-	}
-
-	return 0;
-gpio_set_dir:
-	gpio_set_value(GPIO_HAP_SHIFT_LVL_OE, 0);
-free_gpio:
-	gpio_free(GPIO_HAP_SHIFT_LVL_OE);
-vreg_get_fail:
-	while (i)
-		regulator_put(vregs_isa1200[--i]);
-	return rc;
-}
-
-#define PMIC_GPIO_HAP_ENABLE   18  /* PMIC GPIO Number 19 */
-#define PMIC_GPIO_HAP_LDO_ENABLE   5  /* PMIC GPIO Number 6 */
 static struct isa1200_platform_data isa1200_1_pdata = {
 	.name = "vibrator",
-	.power_on = isa1200_power,
-	.dev_setup = isa1200_dev_setup,
-	/*gpio to enable haptic*/
-	.hap_en_gpio = PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_HAP_ENABLE),
-	.hap_len_gpio = PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_HAP_LDO_ENABLE),
+	/*gpio to enable haptic */
+	.hap_len_gpio = GPIO_HAP_LENABLE,
+	.hap_en_gpio = GPIO_HAP_HENABLE,
 	.max_timeout = 15000,
-	.mode_ctrl = PWM_GEN_MODE,
+	.mode_ctrl = PWM_INPUT_MODE,
+	.pwm_ch_id = 1,
 	.pwm_fd = {
-		.pwm_div = 256,
-	},
+		   .pwm_freq = 44800,
+		   },
+	.duty = 90,
 	.is_erm = false,
-	.smart_en = true,
-	.ext_clk_en = true,
+	.smart_en = false,
+	.ext_clk_en = false,
 	.chip_en = 1,
 };
 
 static struct i2c_board_info msm_isa1200_board_info[] = {
 	{
-		I2C_BOARD_INFO("isa1200_1", 0x90>>1),
-		.platform_data = &isa1200_1_pdata,
-	},
+	 I2C_BOARD_INFO("isa1200_1", 0x90 >> 1),
+	 .platform_data = &isa1200_1_pdata,
+	 },
 };
 #endif
 
 #if defined(CONFIG_BATTERY_BQ27520) || \
 		defined(CONFIG_BATTERY_BQ27520_MODULE)
 static struct bq27520_platform_data bq27520_pdata = {
-	.name		= "fuel-gauge",
-	.vreg_name	= "8058_s3",
-	.vreg_value	= 1800000,
-	.soc_int	= GPIO_BATT_GAUGE_INT_N,
-	.bi_tout	= GPIO_CAP_GAUGE_BI_TOUT,
-	.chip_en	= GPIO_BATT_GAUGE_EN,
-	.enable_dlog	= 0, /* if enable coulomb counter logger */
+	.name = "fuel-gauge",
+	.vreg_name = "8058_s3",
+	.vreg_value = 1800000,
+	.soc_int = GPIO_BATT_GAUGE_INT_N,
+	.bi_tout = GPIO_CAP_GAUGE_BI_TOUT,
+	.chip_en = GPIO_BATT_GAUGE_EN,
+	.enable_dlog = 0,	/* if enable coulomb counter logger */
 };
 
 static struct i2c_board_info msm_bq27520_board_info[] = {
 	{
-		I2C_BOARD_INFO("bq27520", 0xaa>>1),
-		.platform_data = &bq27520_pdata,
-	},
+	 I2C_BOARD_INFO("bq27520", 0xaa >> 1),
+	 .platform_data = &bq27520_pdata,
+	 },
 };
 #endif
 
 static struct msm_rpmrs_level msm_rpmrs_levels[] __initdata = {
 	{
-		MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT,
-		MSM_RPMRS_LIMITS(ON, ACTIVE, MAX, ACTIVE),
-		true,
-		1, 8000, 100000, 1,
-	},
+	 MSM_PM_SLEEP_MODE_WAIT_FOR_INTERRUPT,
+	 MSM_RPMRS_LIMITS(ON, ACTIVE, MAX, ACTIVE),
+	 true,
+	 1, 8000, 100000, 1,
+	 },
 
 	{
-		MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE,
-		MSM_RPMRS_LIMITS(ON, ACTIVE, MAX, ACTIVE),
-		true,
-		1500, 5000, 60100000, 3000,
-	},
+	 MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE,
+	 MSM_RPMRS_LIMITS(ON, ACTIVE, MAX, ACTIVE),
+	 true,
+	 1500, 5000, 60100000, 3000,
+	 },
 
 	{
-		MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
-		MSM_RPMRS_LIMITS(ON, ACTIVE, MAX, ACTIVE),
-		false,
-		1800, 5000, 60350000, 3500,
-	},
+	 MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
+	 MSM_RPMRS_LIMITS(ON, ACTIVE, MAX, ACTIVE),
+	 false,
+	 1800, 5000, 60350000, 3500,
+	 },
 	{
-		MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
-		MSM_RPMRS_LIMITS(OFF, ACTIVE, MAX, ACTIVE),
-		false,
-		3800, 4500, 65350000, 5500,
-	},
+	 MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
+	 MSM_RPMRS_LIMITS(OFF, ACTIVE, MAX, ACTIVE),
+	 false,
+	 3800, 4500, 65350000, 5500,
+	 },
 
 	{
-		MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
-		MSM_RPMRS_LIMITS(ON, HSFS_OPEN, MAX, ACTIVE),
-		false,
-		2800, 2500, 66850000, 4800,
-	},
+	 MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
+	 MSM_RPMRS_LIMITS(ON, HSFS_OPEN, MAX, ACTIVE),
+	 false,
+	 2800, 2500, 66850000, 4800,
+	 },
 
 	{
-		MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
-		MSM_RPMRS_LIMITS(OFF, HSFS_OPEN, MAX, ACTIVE),
-		false,
-		4800, 2000, 71850000, 6800,
-	},
+	 MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
+	 MSM_RPMRS_LIMITS(OFF, HSFS_OPEN, MAX, ACTIVE),
+	 false,
+	 4800, 2000, 71850000, 6800,
+	 },
 
 	{
-		MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
-		MSM_RPMRS_LIMITS(OFF, HSFS_OPEN, ACTIVE, RET_HIGH),
-		false,
-		6800, 500, 75850000, 8800,
-	},
+	 MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
+	 MSM_RPMRS_LIMITS(OFF, HSFS_OPEN, ACTIVE, RET_HIGH),
+	 false,
+	 6800, 500, 75850000, 8800,
+	 },
 
 	{
-		MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
-		MSM_RPMRS_LIMITS(OFF, HSFS_OPEN, RET_HIGH, RET_LOW),
-		false,
-		7800, 0, 76350000, 9800,
-	},
+	 MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
+	 MSM_RPMRS_LIMITS(OFF, HSFS_OPEN, RET_HIGH, RET_LOW),
+	 false,
+	 7800, 0, 76350000, 9800,
+	 },
 };
 
 static struct msm_rpmrs_platform_data msm_rpmrs_data __initdata = {
 	.levels = &msm_rpmrs_levels[0],
 	.num_levels = ARRAY_SIZE(msm_rpmrs_levels),
-	.vdd_mem_levels  = {
-		[MSM_RPMRS_VDD_MEM_RET_LOW]     = 500,
-		[MSM_RPMRS_VDD_MEM_RET_HIGH]    = 750,
-		[MSM_RPMRS_VDD_MEM_ACTIVE]      = 1000,
-		[MSM_RPMRS_VDD_MEM_MAX]         = 1325,
-	},
+	.vdd_mem_levels = {
+			   [MSM_RPMRS_VDD_MEM_RET_LOW] = 500,
+			   [MSM_RPMRS_VDD_MEM_RET_HIGH] = 750,
+			   [MSM_RPMRS_VDD_MEM_ACTIVE] = 1000,
+			   [MSM_RPMRS_VDD_MEM_MAX] = 1325,
+			   },
 	.vdd_dig_levels = {
-		[MSM_RPMRS_VDD_DIG_RET_LOW]     = 500,
-		[MSM_RPMRS_VDD_DIG_RET_HIGH]    = 750,
-		[MSM_RPMRS_VDD_DIG_ACTIVE]      = 1000,
-		[MSM_RPMRS_VDD_DIG_MAX]         = 1250,
-	},
+			   [MSM_RPMRS_VDD_DIG_RET_LOW] = 500,
+			   [MSM_RPMRS_VDD_DIG_RET_HIGH] = 750,
+			   [MSM_RPMRS_VDD_DIG_ACTIVE] = 1000,
+			   [MSM_RPMRS_VDD_DIG_MAX] = 1250,
+			   },
 	.vdd_mask = 0xFFF,
 	.rpmrs_target_id = {
-		[MSM_RPMRS_ID_PXO_CLK]          = MSM_RPM_ID_PXO_CLK,
-		[MSM_RPMRS_ID_L2_CACHE_CTL]     = MSM_RPM_ID_APPS_L2_CACHE_CTL,
-		[MSM_RPMRS_ID_VDD_DIG_0]        = MSM_RPM_ID_SMPS1_0,
-		[MSM_RPMRS_ID_VDD_DIG_1]        = MSM_RPM_ID_SMPS1_1,
-		[MSM_RPMRS_ID_VDD_MEM_0]        = MSM_RPM_ID_SMPS0_0,
-		[MSM_RPMRS_ID_VDD_MEM_1]        = MSM_RPM_ID_SMPS0_1,
-		[MSM_RPMRS_ID_RPM_CTL]          = MSM_RPM_ID_TRIGGER_SET_FROM,
-	},
+			    [MSM_RPMRS_ID_PXO_CLK] = MSM_RPM_ID_PXO_CLK,
+			    [MSM_RPMRS_ID_L2_CACHE_CTL] =
+			    MSM_RPM_ID_APPS_L2_CACHE_CTL,
+			    [MSM_RPMRS_ID_VDD_DIG_0] = MSM_RPM_ID_SMPS1_0,
+			    [MSM_RPMRS_ID_VDD_DIG_1] = MSM_RPM_ID_SMPS1_1,
+			    [MSM_RPMRS_ID_VDD_MEM_0] = MSM_RPM_ID_SMPS0_0,
+			    [MSM_RPMRS_ID_VDD_MEM_1] = MSM_RPM_ID_SMPS0_1,
+			    [MSM_RPMRS_ID_RPM_CTL] =
+			    MSM_RPM_ID_TRIGGER_SET_FROM,
+			    },
 };
 
 static struct msm_pm_boot_platform_data msm_pm_boot_pdata __initdata = {
@@ -895,14 +811,15 @@ static struct msm_pm_boot_platform_data msm_pm_boot_pdata __initdata = {
 #define ISP1763_RST_GPIO		152
 static struct resource isp1763_resources[] = {
 	[0] = {
-		.flags	= IORESOURCE_MEM,
-		.start	= 0x1D000000,
-		.end	= 0x1D005FFF,		/* 24KB */
-	},
+	       .flags = IORESOURCE_MEM,
+	       .start = 0x1D000000,
+	       .end = 0x1D005FFF,	/* 24KB */
+	       },
 	[1] = {
-		.flags	= IORESOURCE_IRQ,
-	},
+	       .flags = IORESOURCE_IRQ,
+	       },
 };
+
 static void __init msm8x60_cfg_isp1763(void)
 {
 	isp1763_resources[1].start = gpio_to_irq(ISP1763_INT_GPIO);
@@ -917,25 +834,25 @@ static int isp1763_setup_gpio(int enable)
 		status = gpio_request(ISP1763_INT_GPIO, "isp1763_usb");
 		if (status) {
 			pr_err("%s:Failed to request GPIO %d\n",
-						__func__, ISP1763_INT_GPIO);
+			       __func__, ISP1763_INT_GPIO);
 			return status;
 		}
 		status = gpio_direction_input(ISP1763_INT_GPIO);
 		if (status) {
 			pr_err("%s:Failed to configure GPIO %d\n",
-					__func__, ISP1763_INT_GPIO);
+			       __func__, ISP1763_INT_GPIO);
 			goto gpio_free_int;
 		}
 		status = gpio_request(ISP1763_RST_GPIO, "isp1763_usb");
 		if (status) {
 			pr_err("%s:Failed to request GPIO %d\n",
-						__func__, ISP1763_RST_GPIO);
+			       __func__, ISP1763_RST_GPIO);
 			goto gpio_free_int;
 		}
 		status = gpio_direction_output(ISP1763_RST_GPIO, 1);
 		if (status) {
 			pr_err("%s:Failed to configure GPIO %d\n",
-					__func__, ISP1763_RST_GPIO);
+			       __func__, ISP1763_RST_GPIO);
 			goto gpio_free_rst;
 		}
 		pr_debug("\nISP GPIO configuration done\n");
@@ -949,18 +866,18 @@ gpio_free_int:
 
 	return status;
 }
+
 static struct isp1763_platform_data isp1763_pdata = {
-	.reset_gpio	= ISP1763_RST_GPIO,
-	.setup_gpio	= isp1763_setup_gpio
+	.reset_gpio = ISP1763_RST_GPIO,
+	.setup_gpio = isp1763_setup_gpio
 };
 
 static struct platform_device isp1763_device = {
-	.name          = "isp1763_usb",
+	.name = "isp1763_usb",
 	.num_resources = ARRAY_SIZE(isp1763_resources),
-	.resource      = isp1763_resources,
-	.dev           = {
-		.platform_data = &isp1763_pdata
-	}
+	.resource = isp1763_resources,
+	.dev = {
+		.platform_data = &isp1763_pdata}
 };
 #endif
 
@@ -986,6 +903,7 @@ static int __init usb_id_pin_rework_setup(char *support)
 
 	return 1;
 }
+
 __setup("usb_id_pin_rework=", usb_id_pin_rework_setup);
 
 static void pmic_id_detect(struct work_struct *w)
@@ -1014,60 +932,60 @@ static int msm_hsusb_phy_id_setup_init(int init)
 	unsigned ret;
 
 	struct pm8xxx_mpp_config_data hsusb_phy_mpp = {
-		.type	= PM8XXX_MPP_TYPE_D_OUTPUT,
-		.level	= PM8901_MPP_DIG_LEVEL_L5,
+		.type = PM8XXX_MPP_TYPE_D_OUTPUT,
+		.level = PM8901_MPP_DIG_LEVEL_L5,
 	};
 
 	if (init) {
 		hsusb_phy_mpp.control = PM8XXX_MPP_DOUT_CTRL_HIGH;
 		ret = pm8xxx_mpp_config(PM8901_MPP_PM_TO_SYS(1),
-							&hsusb_phy_mpp);
+					&hsusb_phy_mpp);
 		if (ret < 0)
 			pr_err("%s:MPP2 configuration failed\n", __func__);
 	} else {
 		hsusb_phy_mpp.control = PM8XXX_MPP_DOUT_CTRL_LOW;
 		ret = pm8xxx_mpp_config(PM8901_MPP_PM_TO_SYS(1),
-							&hsusb_phy_mpp);
+					&hsusb_phy_mpp);
 		if (ret < 0)
 			pr_err("%s:MPP2 un config failed\n", __func__);
 	}
 	return ret;
 }
 
-static int msm_hsusb_pmic_id_notif_init(void (*callback)(int online), int init)
+static int msm_hsusb_pmic_id_notif_init(void (*callback) (int online), int init)
 {
 	unsigned ret = -ENODEV;
 
 	struct pm_gpio pmic_id_cfg = {
-		.direction	= PM_GPIO_DIR_IN,
-		.pull		= PM_GPIO_PULL_UP_1P5,
-		.function	= PM_GPIO_FUNC_NORMAL,
-		.vin_sel	= 2,
-		.inv_int_pol	= 0,
+		.direction = PM_GPIO_DIR_IN,
+		.pull = PM_GPIO_PULL_UP_1P5,
+		.function = PM_GPIO_FUNC_NORMAL,
+		.vin_sel = 2,
+		.inv_int_pol = 0,
 	};
 	struct pm_gpio pmic_id_uncfg = {
-		.direction	= PM_GPIO_DIR_IN,
-		.pull		= PM_GPIO_PULL_NO,
-		.function	= PM_GPIO_FUNC_NORMAL,
-		.vin_sel	= 2,
-		.inv_int_pol	= 0,
+		.direction = PM_GPIO_DIR_IN,
+		.pull = PM_GPIO_PULL_NO,
+		.function = PM_GPIO_FUNC_NORMAL,
+		.vin_sel = 2,
+		.inv_int_pol = 0,
 	};
 	if (!callback)
 		return -EINVAL;
 
-	if (machine_is_msm8x60_fluid())
+	if (machine_is_msm8x60_fluid() || machine_is_mione())
 		return -ENOTSUPP;
 
 	if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) != 2) {
 		pr_debug("%s: USB_ID pin is not routed to PMIC"
-					"on V1 surf/ffa\n", __func__);
+			 "on V1 surf/ffa\n", __func__);
 		return -ENOTSUPP;
 	}
 
 	if ((machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa() ||
-			machine_is_msm8x60_ffa()) && !pmic_id_notif_supported) {
+	     machine_is_msm8x60_ffa()) && !pmic_id_notif_supported) {
 		pr_debug("%s: USB_ID is not routed to PMIC"
-			"on V2 ffa\n", __func__);
+			 "on V2 ffa\n", __func__);
 		return -ENOTSUPP;
 	}
 
@@ -1077,18 +995,19 @@ static int msm_hsusb_pmic_id_notif_init(void (*callback)(int online), int init)
 		notify_vbus_state_func_ptr = callback;
 		INIT_DELAYED_WORK(&pmic_id_det, pmic_id_detect);
 		ret = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(PMIC_ID_GPIO),
-							&pmic_id_cfg);
+					 &pmic_id_cfg);
 		if (ret) {
 			pr_err("%s:return val of pm8xxx_gpio_config: %d\n",
-						__func__,  ret);
+			       __func__, ret);
 			return ret;
 		}
 		ret = request_threaded_irq(PMICID_INT, NULL, pmic_id_on_irq,
-			(IRQF_TRIGGER_RISING|IRQF_TRIGGER_FALLING),
-						"msm_otg_id", NULL);
+					   (IRQF_TRIGGER_RISING |
+					    IRQF_TRIGGER_FALLING), "msm_otg_id",
+					   NULL);
 		if (ret) {
 			pr_err("%s:pmic_usb_id interrupt registration failed",
-					__func__);
+			       __func__);
 			return ret;
 		}
 		msm_otg_pdata.pmic_id_irq = PMICID_INT;
@@ -1096,10 +1015,10 @@ static int msm_hsusb_pmic_id_notif_init(void (*callback)(int online), int init)
 		usb_phy_susp_dig_vol = 750000;
 		free_irq(PMICID_INT, 0);
 		ret = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(PMIC_ID_GPIO),
-							&pmic_id_uncfg);
+					 &pmic_id_uncfg);
 		if (ret) {
 			pr_err("%s: return val of pm8xxx_gpio_config: %d\n",
-						__func__,  ret);
+			       __func__, ret);
 			return ret;
 		}
 		msm_otg_pdata.pmic_id_irq = 0;
@@ -1123,11 +1042,11 @@ static int msm_hsusb_init_vddcx(int init)
 		}
 
 		ret = regulator_set_voltage(vdd_cx,
-				USB_PHY_OPERATIONAL_MIN_VDD_DIG_VOL,
-				USB_PHY_MAX_VDD_DIG_VOL);
+					    USB_PHY_OPERATIONAL_MIN_VDD_DIG_VOL,
+					    USB_PHY_MAX_VDD_DIG_VOL);
 		if (ret) {
 			pr_err("%s: unable to set the voltage for regulator"
-				"vdd_cx\n", __func__);
+			       "vdd_cx\n", __func__);
 			regulator_put(vdd_cx);
 			return ret;
 		}
@@ -1135,14 +1054,14 @@ static int msm_hsusb_init_vddcx(int init)
 		ret = regulator_enable(vdd_cx);
 		if (ret) {
 			pr_err("%s: unable to enable regulator"
-				"vdd_cx\n", __func__);
+			       "vdd_cx\n", __func__);
 			regulator_put(vdd_cx);
 		}
 	} else {
 		ret = regulator_disable(vdd_cx);
 		if (ret) {
 			pr_err("%s: Unable to disable the regulator:"
-				"vdd_cx\n", __func__);
+			       "vdd_cx\n", __func__);
 			return ret;
 		}
 
@@ -1166,7 +1085,7 @@ static int msm_hsusb_config_vddcx(int high)
 	ret = regulator_set_voltage(vdd_cx, min_vol, max_vol);
 	if (ret) {
 		pr_err("%s: unable to set the voltage for regulator"
-			"vdd_cx\n", __func__);
+		       "vdd_cx\n", __func__);
 		return ret;
 	}
 
@@ -1175,13 +1094,13 @@ static int msm_hsusb_config_vddcx(int high)
 	return ret;
 }
 
-#define USB_PHY_3P3_VOL_MIN	3050000 /* uV */
-#define USB_PHY_3P3_VOL_MAX	3050000 /* uV */
+#define USB_PHY_3P3_VOL_MIN	3050000	/* uV */
+#define USB_PHY_3P3_VOL_MAX	3050000	/* uV */
 #define USB_PHY_3P3_HPM_LOAD	50000	/* uA */
 #define USB_PHY_3P3_LPM_LOAD	4000	/* uA */
 
-#define USB_PHY_1P8_VOL_MIN	1800000 /* uV */
-#define USB_PHY_1P8_VOL_MAX	1800000 /* uV */
+#define USB_PHY_1P8_VOL_MIN	1800000	/* uV */
+#define USB_PHY_1P8_VOL_MAX	1800000	/* uV */
 #define USB_PHY_1P8_HPM_LOAD	50000	/* uA */
 #define USB_PHY_1P8_LPM_LOAD	4000	/* uA */
 static int msm_hsusb_ldo_init(int init)
@@ -1200,29 +1119,29 @@ static int msm_hsusb_ldo_init(int init)
 		}
 
 		rc = regulator_set_voltage(ldo6_3p3, USB_PHY_3P3_VOL_MIN,
-				USB_PHY_3P3_VOL_MAX);
+					   USB_PHY_3P3_VOL_MAX);
 		if (rc) {
 			pr_err("%s: Unable to set voltage level for"
-				"ldo6_3p3 regulator\n", __func__);
+			       "ldo6_3p3 regulator\n", __func__);
 			goto put_1p8;
 		}
 		rc = regulator_enable(ldo6_3p3);
 		if (rc) {
 			pr_err("%s: Unable to enable the regulator:"
-				"ldo6_3p3\n", __func__);
+			       "ldo6_3p3\n", __func__);
 			goto put_1p8;
 		}
 		rc = regulator_set_voltage(ldo7_1p8, USB_PHY_1P8_VOL_MIN,
-				USB_PHY_1P8_VOL_MAX);
+					   USB_PHY_1P8_VOL_MAX);
 		if (rc) {
 			pr_err("%s: Unable to set voltage level for"
-				"ldo7_1p8 regulator\n", __func__);
+			       "ldo7_1p8 regulator\n", __func__);
 			goto disable_3p3;
 		}
 		rc = regulator_enable(ldo7_1p8);
 		if (rc) {
 			pr_err("%s: Unable to enable the regulator:"
-				"ldo7_1p8\n", __func__);
+			       "ldo7_1p8\n", __func__);
 			goto disable_3p3;
 		}
 
@@ -1255,37 +1174,37 @@ static int msm_hsusb_ldo_enable(int on)
 
 	if (on) {
 		ret = regulator_set_optimum_mode(ldo7_1p8,
-				USB_PHY_1P8_HPM_LOAD);
+						 USB_PHY_1P8_HPM_LOAD);
 		if (ret < 0) {
 			pr_err("%s: Unable to set HPM of the regulator:"
-				"ldo7_1p8\n", __func__);
+			       "ldo7_1p8\n", __func__);
 			return ret;
 		}
 		ret = regulator_set_optimum_mode(ldo6_3p3,
-				USB_PHY_3P3_HPM_LOAD);
+						 USB_PHY_3P3_HPM_LOAD);
 		if (ret < 0) {
 			pr_err("%s: Unable to set HPM of the regulator:"
-				"ldo6_3p3\n", __func__);
+			       "ldo6_3p3\n", __func__);
 			regulator_set_optimum_mode(ldo7_1p8,
-				USB_PHY_1P8_LPM_LOAD);
+						   USB_PHY_1P8_LPM_LOAD);
 			return ret;
 		}
 	} else {
 		ret = regulator_set_optimum_mode(ldo7_1p8,
-				USB_PHY_1P8_LPM_LOAD);
+						 USB_PHY_1P8_LPM_LOAD);
 		if (ret < 0)
 			pr_err("%s: Unable to set LPM of the regulator:"
-				"ldo7_1p8\n", __func__);
+			       "ldo7_1p8\n", __func__);
 		ret = regulator_set_optimum_mode(ldo6_3p3,
-				USB_PHY_3P3_LPM_LOAD);
+						 USB_PHY_3P3_LPM_LOAD);
 		if (ret < 0)
 			pr_err("%s: Unable to set LPM of the regulator:"
-				"ldo6_3p3\n", __func__);
+			       "ldo6_3p3\n", __func__);
 	}
 
 	pr_debug("reg (%s)\n", on ? "HPM" : "LPM");
 	return ret < 0 ? ret : 0;
- }
+}
 #endif
 #ifdef CONFIG_USB_EHCI_MSM_72K
 #if defined(CONFIG_SMB137B_CHARGER) || defined(CONFIG_SMB137B_CHARGER_MODULE)
@@ -1305,6 +1224,7 @@ static void msm_hsusb_vbus_power(unsigned phy_info, int on)
 	static struct regulator *votg_5v_switch;
 	static struct regulator *ext_5v_reg;
 	static int vbus_is_on;
+	static int status;
 
 	/* If VBUS is already on (or off), do nothing. */
 	if (on == vbus_is_on)
@@ -1325,37 +1245,56 @@ static void msm_hsusb_vbus_power(unsigned phy_info, int on)
 		}
 	}
 	if (on) {
+		status = gpio_request(62, "otg_5v_en");
+		if (status) {
+			pr_err("%s:Failed to request GPIO62 status:%d\n",
+			       __func__, status);
+		} else {
+			status = gpio_direction_output(62, 1);
+			if (status) {
+				pr_err("%s:Failed to set GPIO62 status:%d\n",
+				       __func__, status);
+			}
+		}
+
 		if (regulator_enable(ext_5v_reg)) {
 			pr_err("%s: Unable to enable the regulator:"
-					" ext_5v_reg\n", __func__);
+			       " ext_5v_reg\n", __func__);
 			return;
 		}
 		if (regulator_enable(votg_5v_switch)) {
 			pr_err("%s: Unable to enable the regulator:"
-					" votg_5v_switch\n", __func__);
+			       " votg_5v_switch\n", __func__);
 			return;
 		}
 	} else {
 		if (regulator_disable(votg_5v_switch))
 			pr_err("%s: Unable to enable the regulator:"
-				" votg_5v_switch\n", __func__);
+			       " votg_5v_switch\n", __func__);
 		if (regulator_disable(ext_5v_reg))
 			pr_err("%s: Unable to enable the regulator:"
-				" ext_5v_reg\n", __func__);
+			       " ext_5v_reg\n", __func__);
+
+		status = gpio_direction_output(62, 0);
+		if (status) {
+			pr_err("%s:Failed to clr GPIO62 status:%d\n",
+			       __func__, status);
+		}
+		gpio_free(62);
 	}
 
 	vbus_is_on = on;
 }
 
 static struct msm_usb_host_platform_data msm_usb_host_pdata = {
-	.phy_info	= (USB_PHY_INTEGRATED | USB_PHY_MODEL_45NM),
-	.power_budget	= 390,
+	.phy_info = (USB_PHY_INTEGRATED | USB_PHY_MODEL_45NM),
+	.power_budget = 500,
 };
 #endif
 
 #ifdef CONFIG_BATTERY_MSM8X60
-static int msm_hsusb_pmic_vbus_notif_init(void (*callback)(int online),
-								int init)
+static int msm_hsusb_pmic_vbus_notif_init(void (*callback) (int online),
+					  int init)
 {
 	int ret = -ENOTSUPP;
 
@@ -1365,7 +1304,7 @@ static int msm_hsusb_pmic_vbus_notif_init(void (*callback)(int online),
 			msm_charger_register_vbus_sn(callback);
 		else
 			msm_charger_unregister_vbus_sn(callback);
-		return  0;
+		return 0;
 	}
 #endif
 	/* ID and VBUS lines are connected to pmic on 8660.V2.SURF,
@@ -1374,8 +1313,7 @@ static int msm_hsusb_pmic_vbus_notif_init(void (*callback)(int online),
 	 * vbus notifications
 	 */
 	if ((SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 2)
-			&& (machine_is_msm8x60_surf() ||
-				pmic_id_notif_supported)) {
+	    && (machine_is_msm8x60_surf() || pmic_id_notif_supported)) {
 		if (init)
 			ret = msm_charger_register_vbus_sn(callback);
 		else {
@@ -1384,12 +1322,12 @@ static int msm_hsusb_pmic_vbus_notif_init(void (*callback)(int online),
 		}
 	} else {
 #if !defined(CONFIG_USB_EHCI_MSM_72K)
-	if (init)
-		ret = msm_charger_register_vbus_sn(callback);
-	else {
-		msm_charger_unregister_vbus_sn(callback);
-		ret = 0;
-	}
+		if (init)
+			ret = msm_charger_register_vbus_sn(callback);
+		else {
+			msm_charger_unregister_vbus_sn(callback);
+			ret = 0;
+		}
 #endif
 	}
 	return ret;
@@ -1402,10 +1340,10 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 	 * usb pclk as dayatona fabric clock will be
 	 * used instead
 	 */
-	.pemp_level		 = PRE_EMPHASIS_WITH_20_PERCENT,
-	.cdr_autoreset		 = CDR_AUTO_RESET_DISABLE,
-	.se1_gating		 = SE1_GATING_DISABLE,
-	.bam_disable		 = 1,
+	.pemp_level = PRE_EMPHASIS_WITH_20_PERCENT,
+	.cdr_autoreset = CDR_AUTO_RESET_DISABLE,
+	.se1_gating = SE1_GATING_DISABLE,
+	.bam_disable = 1,
 #ifdef CONFIG_USB_EHCI_MSM_72K
 	.pmic_id_notif_init = msm_hsusb_pmic_id_notif_init,
 	.phy_id_setup_init = msm_hsusb_phy_id_setup_init,
@@ -1414,12 +1352,12 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 	.vbus_power = msm_hsusb_vbus_power,
 #endif
 #ifdef CONFIG_BATTERY_MSM8X60
-	.pmic_vbus_notif_init	= msm_hsusb_pmic_vbus_notif_init,
+	.pmic_vbus_notif_init = msm_hsusb_pmic_vbus_notif_init,
 #endif
-	.ldo_init		 = msm_hsusb_ldo_init,
-	.ldo_enable		 = msm_hsusb_ldo_enable,
-	.config_vddcx            = msm_hsusb_config_vddcx,
-	.init_vddcx              = msm_hsusb_init_vddcx,
+	.ldo_init = msm_hsusb_ldo_init,
+	.ldo_enable = msm_hsusb_ldo_enable,
+	.config_vddcx = msm_hsusb_config_vddcx,
+	.init_vddcx = msm_hsusb_init_vddcx,
 #ifdef CONFIG_BATTERY_MSM8X60
 	.chg_vbus_draw = msm_charger_vbus_draw,
 #endif
@@ -1445,15 +1383,14 @@ struct magic_num_struct {
 };
 
 struct dload_struct {
-	uint32_t	reserved1;
-	uint32_t	reserved2;
-	uint32_t	reserved3;
-	uint16_t	reserved4;
-	uint16_t	pid;
-	char		serial_number[SERIAL_NUMBER_LENGTH];
-	uint16_t	reserved5;
-	struct magic_num_struct
-			magic_struct;
+	uint32_t reserved1;
+	uint32_t reserved2;
+	uint32_t reserved3;
+	uint16_t reserved4;
+	uint16_t pid;
+	char serial_number[SERIAL_NUMBER_LENGTH];
+	uint16_t reserved5;
+	struct magic_num_struct magic_struct;
 };
 
 static int usb_diag_update_pid_and_serial_num(uint32_t pid, const char *snum)
@@ -1463,12 +1400,12 @@ static int usb_diag_update_pid_and_serial_num(uint32_t pid, const char *snum)
 	dload = ioremap(DLOAD_USB_BASE_ADD, sizeof(*dload));
 	if (!dload) {
 		pr_err("%s: cannot remap I/O memory region: %08x\n",
-					__func__, DLOAD_USB_BASE_ADD);
+		       __func__, DLOAD_USB_BASE_ADD);
 		return -ENXIO;
 	}
 
 	pr_debug("%s: dload:%p pid:%x serial_num:%s\n",
-				__func__, dload, pid, snum);
+		 __func__, dload, pid, snum);
 	/* update pid */
 	dload->magic_struct.pid = PID_MAGIC_ID;
 	dload->pid = pid;
@@ -1492,13 +1429,12 @@ static struct android_usb_platform_data android_usb_pdata = {
 };
 
 static struct platform_device android_usb_device = {
-	.name	= "android_usb",
-	.id	= -1,
-	.dev	= {
+	.name = "android_usb",
+	.id = -1,
+	.dev = {
 		.platform_data = &android_usb_pdata,
-	},
+		},
 };
-
 
 #endif
 
@@ -1506,24 +1442,45 @@ static struct platform_device android_usb_device = {
 #ifndef CONFIG_MSM_CAMERA_V4L2
 static struct resource msm_vpe_resources[] = {
 	{
-		.start	= 0x05300000,
-		.end	= 0x05300000 + SZ_1M - 1,
-		.flags	= IORESOURCE_MEM,
-	},
+	 .start = 0x05300000,
+	 .end = 0x05300000 + SZ_1M - 1,
+	 .flags = IORESOURCE_MEM,
+	 },
 	{
-		.start	= INT_VPE,
-		.end	= INT_VPE,
-		.flags	= IORESOURCE_IRQ,
-	},
+	 .start = INT_VPE,
+	 .end = INT_VPE,
+	 .flags = IORESOURCE_IRQ,
+	 },
 };
 
 static struct platform_device msm_vpe_device = {
 	.name = "msm_vpe",
-	.id   = 0,
+	.id = 0,
 	.num_resources = ARRAY_SIZE(msm_vpe_resources),
 	.resource = msm_vpe_resources,
 };
 #endif
+#endif
+
+#ifdef CONFIG_LEDS_LM3554
+static struct lm3554_platform_data lm3554_led_flash = {
+	.torch_brightness_def = 0xa0,
+	.flash_brightness_def = 0x78,
+	.flash_duration_def = 0x0f,
+	.config_reg_1_def = 0xe0,
+	.config_reg_2_def = 0xf0,
+	.vin_monitor_def = 0x01,
+	.gpio_reg_def = 0x0,
+	.hwen_gpio = 138,
+	.strobe_gpio = 152,
+};
+
+static struct i2c_board_info lm3554_i2c_info[] = {
+	{
+	 I2C_BOARD_INFO("lm3554_led", 0x53),
+	 .platform_data = &lm3554_led_flash,
+	 },
+};
 #endif
 
 #ifdef CONFIG_MSM_CAMERA
@@ -1536,12 +1493,13 @@ static struct platform_device msm_vpe_device = {
 static struct msm_camera_sensor_flash_src msm_flash_src = {
 	.flash_sr_type = MSM_CAMERA_FLASH_SRC_PMIC,
 	._fsrc.pmic_src.num_of_src = 2,
-	._fsrc.pmic_src.low_current  = 100,
+	._fsrc.pmic_src.low_current = 100,
 	._fsrc.pmic_src.high_current = 300,
 	._fsrc.pmic_src.led_src_1 = PMIC8058_ID_FLASH_LED_0,
 	._fsrc.pmic_src.led_src_2 = PMIC8058_ID_FLASH_LED_1,
 	._fsrc.pmic_src.pmic_set_current = pm8058_set_flash_led_current,
 };
+
 #ifdef CONFIG_IMX074
 static struct msm_camera_sensor_strobe_flash_data strobe_flash_xenon = {
 	.flash_trigger = VFE_CAMIF_TIMER2_GPIO,
@@ -1554,13 +1512,13 @@ static struct msm_camera_sensor_strobe_flash_data strobe_flash_xenon = {
 #endif
 
 int msm_cam_gpio_tbl[] = {
-	32,/*CAMIF_MCLK*/
-	47,/*CAMIF_I2C_DATA*/
-	48,/*CAMIF_I2C_CLK*/
-	105,/*STANDBY*/
+	32,			/*CAMIF_MCLK */
+	47,			/*CAMIF_I2C_DATA */
+	48,			/*CAMIF_I2C_CLK */
+	105, /*STANDBY*/
 };
 
-enum msm_cam_stat{
+enum msm_cam_stat {
 	MSM_CAM_OFF,
 	MSM_CAM_ON,
 };
@@ -1599,32 +1557,31 @@ static int config_camera_on_gpios_fluid(void)
 	reg_flash_5V = regulator_get(NULL, "8901_mpp0");
 	if (IS_ERR(reg_flash_5V)) {
 		pr_err("'%s' regulator not found, rc=%ld\n",
-				"8901_mpp0", IS_ERR(reg_flash_5V));
+		       "8901_mpp0", IS_ERR(reg_flash_5V));
 		return -ENODEV;
 	}
 
 	rc = regulator_enable(reg_flash_5V);
 	if (rc) {
 		pr_err("'%s' regulator enable failed, rc=%d\n",
-			"8901_mpp0", rc);
+		       "8901_mpp0", rc);
 		regulator_put(reg_flash_5V);
 		return rc;
 	}
-
 #ifdef CONFIG_IMX074
 	sensor_board_info.mount_angle = 90;
 #endif
 	rc = config_gpio_table(MSM_CAM_ON);
 	if (rc < 0) {
 		printk(KERN_ERR "%s: CAMSENSOR gpio table request"
-		"failed\n", __func__);
+		       "failed\n", __func__);
 		return rc;
 	}
 
 	rc = gpio_request(GPIO_EXT_CAMIF_PWR_EN, "CAM_EN");
 	if (rc < 0) {
 		printk(KERN_ERR "%s: CAMSENSOR gpio %d request"
-			"failed\n", __func__, GPIO_EXT_CAMIF_PWR_EN);
+		       "failed\n", __func__, GPIO_EXT_CAMIF_PWR_EN);
 		regulator_disable(reg_flash_5V);
 		regulator_put(reg_flash_5V);
 		return rc;
@@ -1633,12 +1590,11 @@ static int config_camera_on_gpios_fluid(void)
 	msleep(20);
 	gpio_set_value_cansleep(GPIO_EXT_CAMIF_PWR_EN, 1);
 
-
-	/*Enable LED_FLASH_EN*/
+	/*Enable LED_FLASH_EN */
 	rc = gpio_request(GPIO_LED_FLASH_EN, "LED_FLASH_EN");
 	if (rc < 0) {
 		printk(KERN_ERR "%s: CAMSENSOR gpio %d request"
-			"failed\n", __func__, GPIO_LED_FLASH_EN);
+		       "failed\n", __func__, GPIO_LED_FLASH_EN);
 
 		regulator_disable(reg_flash_5V);
 		regulator_put(reg_flash_5V);
@@ -1651,7 +1607,6 @@ static int config_camera_on_gpios_fluid(void)
 	msleep(20);
 	return rc;
 }
-
 
 static void config_camera_off_gpios_fluid(void)
 {
@@ -1666,6 +1621,7 @@ static void config_camera_off_gpios_fluid(void)
 	gpio_set_value_cansleep(GPIO_EXT_CAMIF_PWR_EN, 0);
 	gpio_free(GPIO_EXT_CAMIF_PWR_EN);
 }
+
 static int config_camera_on_gpios(void)
 {
 	int rc = 0;
@@ -1676,7 +1632,7 @@ static int config_camera_on_gpios(void)
 	rc = config_gpio_table(MSM_CAM_ON);
 	if (rc < 0) {
 		printk(KERN_ERR "%s: CAMSENSOR gpio table request"
-		"failed\n", __func__);
+		       "failed\n", __func__);
 		return rc;
 	}
 
@@ -1685,14 +1641,13 @@ static int config_camera_on_gpios(void)
 		if (rc < 0) {
 			config_gpio_table(MSM_CAM_OFF);
 			pr_err("%s: CAMSENSOR gpio %d request"
-				"failed\n", __func__, GPIO_EXT_CAMIF_PWR_EN);
+			       "failed\n", __func__, GPIO_EXT_CAMIF_PWR_EN);
 			return rc;
 		}
 		gpio_direction_output(GPIO_EXT_CAMIF_PWR_EN, 0);
 		msleep(20);
 		gpio_set_value_cansleep(GPIO_EXT_CAMIF_PWR_EN, 1);
 	}
-
 #ifdef CONFIG_MSM_CAMERA_FLASH
 #ifdef CONFIG_IMX074
 	if (machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa())
@@ -1706,7 +1661,6 @@ static void config_camera_off_gpios(void)
 {
 	if (machine_is_msm8x60_fluid())
 		return config_camera_off_gpios_fluid();
-
 
 	config_gpio_table(MSM_CAM_OFF);
 
@@ -1728,7 +1682,7 @@ static int config_camera_on_gpios_qs_cam_fluid(void)
 	rc = gpio_request(QS_CAM_HC37_CAM_PD, "QS_CAM_HC37_CAM_PD");
 	if (rc < 0) {
 		printk(KERN_ERR "%s: QS_CAM_HC37_CAM_PD gpio %d request"
-			" failed\n", __func__, QS_CAM_HC37_CAM_PD);
+		       " failed\n", __func__, QS_CAM_HC37_CAM_PD);
 		return rc;
 	}
 	gpio_direction_output(QS_CAM_HC37_CAM_PD, 0);
@@ -1743,7 +1697,7 @@ static int config_camera_on_gpios_qs_cam_fluid(void)
 	rc = gpio_request(GPIO_AUX_CAM_2P7_EN, "CAM_2P7_EN");
 	if (rc < 0) {
 		printk(KERN_ERR "%s: CAMSENSOR gpio %d request"
-			" failed\n", __func__, GPIO_AUX_CAM_2P7_EN);
+		       " failed\n", __func__, GPIO_AUX_CAM_2P7_EN);
 		gpio_set_value_cansleep(QS_CAM_HC37_CAM_PD, 0);
 		gpio_free(QS_CAM_HC37_CAM_PD);
 		return rc;
@@ -1756,7 +1710,7 @@ static int config_camera_on_gpios_qs_cam_fluid(void)
 	rc = config_camera_on_gpios_fluid();
 	if (rc < 0) {
 		printk(KERN_ERR "%s: config_camera_on_gpios_fluid"
-		" failed\n", __func__);
+		       " failed\n", __func__);
 		gpio_set_value_cansleep(QS_CAM_HC37_CAM_PD, 0);
 		gpio_free(QS_CAM_HC37_CAM_PD);
 		gpio_set_value_cansleep(GPIO_AUX_CAM_2P7_EN, 0);
@@ -1775,7 +1729,7 @@ static void config_camera_off_gpios_qs_cam_fluid(void)
 	gpio_set_value_cansleep(GPIO_AUX_CAM_2P7_EN, 0);
 	gpio_free(GPIO_AUX_CAM_2P7_EN);
 
-	/* set QS_CAM_HC37_CAM_PD to 0 to power off HC37 ASIC*/
+	/* set QS_CAM_HC37_CAM_PD to 0 to power off HC37 ASIC */
 	gpio_set_value_cansleep(QS_CAM_HC37_CAM_PD, 0);
 	gpio_free(QS_CAM_HC37_CAM_PD);
 
@@ -1810,7 +1764,7 @@ static int config_camera_on_gpios_web_cam(void)
 	rc = config_gpio_table(MSM_CAM_ON);
 	if (rc < 0) {
 		printk(KERN_ERR "%s: CAMSENSOR gpio table request"
-		"failed\n", __func__);
+		       "failed\n", __func__);
 		return rc;
 	}
 
@@ -1819,7 +1773,7 @@ static int config_camera_on_gpios_web_cam(void)
 		if (rc < 0) {
 			config_gpio_table(MSM_CAM_OFF);
 			pr_err(KERN_ERR "%s: CAMSENSOR gpio %d request"
-				"failed\n", __func__, GPIO_WEB_CAMIF_STANDBY);
+			       "failed\n", __func__, GPIO_WEB_CAMIF_STANDBY);
 			return rc;
 		}
 		gpio_direction_output(GPIO_WEB_CAMIF_STANDBY, 0);
@@ -1840,323 +1794,323 @@ static void config_camera_off_gpios_web_cam(void)
 #ifdef CONFIG_MSM_BUS_SCALING
 static struct msm_bus_vectors cam_init_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors cam_preview_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 283115520,
-		.ib  = 452984832,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 283115520,
+	 .ib = 452984832,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors cam_video_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 283115520,
-		.ib  = 452984832,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 283115520,
+	 .ib = 452984832,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 283115520,
-		.ib  = 452984832,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 283115520,
+	 .ib = 452984832,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 319610880,
-		.ib  = 511377408,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 319610880,
+	 .ib = 511377408,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors cam_snapshot_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 566231040,
-		.ib  = 905969664,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 566231040,
+	 .ib = 905969664,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 69984000,
-		.ib  = 111974400,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 69984000,
+	 .ib = 111974400,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 320864256,
-		.ib  = 513382810,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 320864256,
+	 .ib = 513382810,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 320864256,
-		.ib  = 513382810,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 320864256,
+	 .ib = 513382810,
+	 },
 };
 
 static struct msm_bus_vectors cam_zsl_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 566231040,
-		.ib  = 905969664,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 566231040,
+	 .ib = 905969664,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 706199040,
-		.ib  = 1129918464,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 706199040,
+	 .ib = 1129918464,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 320864256,
-		.ib  = 513382810,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 320864256,
+	 .ib = 513382810,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 320864256,
-		.ib  = 513382810,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 320864256,
+	 .ib = 513382810,
+	 },
 };
 
 static struct msm_bus_vectors cam_stereo_video_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 212336640,
-		.ib  = 339738624,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 212336640,
+	 .ib = 339738624,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 25090560,
-		.ib  = 40144896,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 25090560,
+	 .ib = 40144896,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 239708160,
-		.ib  = 383533056,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 239708160,
+	 .ib = 383533056,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 79902720,
-		.ib  = 127844352,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 79902720,
+	 .ib = 127844352,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors cam_stereo_snapshot_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VFE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 300902400,
-		.ib  = 481443840,
-	},
+	 .src = MSM_BUS_MASTER_VFE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 300902400,
+	 .ib = 481443840,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 230307840,
-		.ib  = 368492544,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 230307840,
+	 .ib = 368492544,
+	 },
 	{
-		.src = MSM_BUS_MASTER_VPE,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 245113344,
-		.ib  = 392181351,
-	},
+	 .src = MSM_BUS_MASTER_VPE,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 245113344,
+	 .ib = 392181351,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 106536960,
-		.ib  = 170459136,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 106536960,
+	 .ib = 170459136,
+	 },
 	{
-		.src = MSM_BUS_MASTER_JPEG_ENC,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = 106536960,
-		.ib  = 170459136,
-	},
+	 .src = MSM_BUS_MASTER_JPEG_ENC,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 106536960,
+	 .ib = 170459136,
+	 },
 };
 
 static struct msm_bus_paths cam_bus_client_config[] = {
 	{
-		ARRAY_SIZE(cam_init_vectors),
-		cam_init_vectors,
-	},
+	 ARRAY_SIZE(cam_init_vectors),
+	 cam_init_vectors,
+	 },
 	{
-		ARRAY_SIZE(cam_preview_vectors),
-		cam_preview_vectors,
-	},
+	 ARRAY_SIZE(cam_preview_vectors),
+	 cam_preview_vectors,
+	 },
 	{
-		ARRAY_SIZE(cam_video_vectors),
-		cam_video_vectors,
-	},
+	 ARRAY_SIZE(cam_video_vectors),
+	 cam_video_vectors,
+	 },
 	{
-		ARRAY_SIZE(cam_snapshot_vectors),
-		cam_snapshot_vectors,
-	},
+	 ARRAY_SIZE(cam_snapshot_vectors),
+	 cam_snapshot_vectors,
+	 },
 	{
-		ARRAY_SIZE(cam_zsl_vectors),
-		cam_zsl_vectors,
-	},
+	 ARRAY_SIZE(cam_zsl_vectors),
+	 cam_zsl_vectors,
+	 },
 	{
-		ARRAY_SIZE(cam_stereo_video_vectors),
-		cam_stereo_video_vectors,
-	},
+	 ARRAY_SIZE(cam_stereo_video_vectors),
+	 cam_stereo_video_vectors,
+	 },
 	{
-		ARRAY_SIZE(cam_stereo_snapshot_vectors),
-		cam_stereo_snapshot_vectors,
-	},
+	 ARRAY_SIZE(cam_stereo_snapshot_vectors),
+	 cam_stereo_snapshot_vectors,
+	 },
 };
 
 static struct msm_bus_scale_pdata cam_bus_client_pdata = {
-		cam_bus_client_config,
-		ARRAY_SIZE(cam_bus_client_config),
-		.name = "msm_camera",
+	cam_bus_client_config,
+	ARRAY_SIZE(cam_bus_client_config),
+	.name = "msm_camera",
 };
 #endif
 
 struct msm_camera_device_platform_data msm_camera_device_data = {
-	.camera_gpio_on  = config_camera_on_gpios,
+	.camera_gpio_on = config_camera_on_gpios,
 	.camera_gpio_off = config_camera_off_gpios,
 	.ioext.csiphy = 0x04800000,
-	.ioext.csisz  = 0x00000400,
+	.ioext.csisz = 0x00000400,
 	.ioext.csiirq = CSI_0_IRQ,
 	.ioclk.mclk_clk_rate = 24000000,
-	.ioclk.vfe_clk_rate  = 228570000,
+	.ioclk.vfe_clk_rate = 228570000,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.cam_bus_scale_table = &cam_bus_client_pdata,
 #endif
@@ -2164,13 +2118,13 @@ struct msm_camera_device_platform_data msm_camera_device_data = {
 
 #ifdef CONFIG_QS_S5K4E1
 struct msm_camera_device_platform_data msm_camera_device_data_qs_cam = {
-	.camera_gpio_on  = config_camera_on_gpios_qs_cam,
+	.camera_gpio_on = config_camera_on_gpios_qs_cam,
 	.camera_gpio_off = config_camera_off_gpios_qs_cam,
 	.ioext.csiphy = 0x04800000,
-	.ioext.csisz  = 0x00000400,
+	.ioext.csisz = 0x00000400,
 	.ioext.csiirq = CSI_0_IRQ,
 	.ioclk.mclk_clk_rate = 24000000,
-	.ioclk.vfe_clk_rate  = 228570000,
+	.ioclk.vfe_clk_rate = 228570000,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.cam_bus_scale_table = &cam_bus_client_pdata,
 #endif
@@ -2178,13 +2132,13 @@ struct msm_camera_device_platform_data msm_camera_device_data_qs_cam = {
 #endif
 
 struct msm_camera_device_platform_data msm_camera_device_data_web_cam = {
-	.camera_gpio_on  = config_camera_on_gpios_web_cam,
+	.camera_gpio_on = config_camera_on_gpios_web_cam,
 	.camera_gpio_off = config_camera_off_gpios_web_cam,
 	.ioext.csiphy = 0x04900000,
-	.ioext.csisz  = 0x00000400,
+	.ioext.csisz = 0x00000400,
 	.ioext.csiirq = CSI_1_IRQ,
 	.ioclk.mclk_clk_rate = 24000000,
-	.ioclk.vfe_clk_rate  = 228570000,
+	.ioclk.vfe_clk_rate = 228570000,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.cam_bus_scale_table = &cam_bus_client_pdata,
 #endif
@@ -2192,44 +2146,46 @@ struct msm_camera_device_platform_data msm_camera_device_data_web_cam = {
 
 struct resource msm_camera_resources[] = {
 	{
-		.start	= 0x04500000,
-		.end	= 0x04500000 + SZ_1M - 1,
-		.flags	= IORESOURCE_MEM,
-	},
+	 .start = 0x04500000,
+	 .end = 0x04500000 + SZ_1M - 1,
+	 .flags = IORESOURCE_MEM,
+	 },
 	{
-		.start	= VFE_IRQ,
-		.end	= VFE_IRQ,
-		.flags	= IORESOURCE_IRQ,
-	},
+	 .start = VFE_IRQ,
+	 .end = VFE_IRQ,
+	 .flags = IORESOURCE_IRQ,
+	 },
 };
+
 #ifdef CONFIG_MT9E013
 static struct msm_camera_sensor_platform_info mt9e013_sensor_8660_info = {
 	.mount_angle = 0
 };
 
 static struct msm_camera_sensor_flash_data flash_mt9e013 = {
-	.flash_type			= MSM_CAMERA_FLASH_LED,
-	.flash_src			= &msm_flash_src
+	.flash_type = MSM_CAMERA_FLASH_LED,
+	.flash_src = &msm_flash_src
 };
 
 static struct msm_camera_sensor_info msm_camera_sensor_mt9e013_data = {
-		.sensor_name	= "mt9e013",
-		.sensor_reset	= 106,
-		.sensor_pwd		= 85,
-		.vcm_pwd		= 1,
-		.vcm_enable		= 0,
-		.pdata			= &msm_camera_device_data,
-		.resource		= msm_camera_resources,
-		.num_resources	= ARRAY_SIZE(msm_camera_resources),
-		.flash_data		= &flash_mt9e013,
-		.strobe_flash_data	= &strobe_flash_xenon,
-		.sensor_platform_info = &mt9e013_sensor_8660_info,
-		.csi_if			= 1
+	.sensor_name = "mt9e013",
+	.sensor_reset = 106,
+	.sensor_pwd = 85,
+	.vcm_pwd = 1,
+	.vcm_enable = 0,
+	.pdata = &msm_camera_device_data,
+	.resource = msm_camera_resources,
+	.num_resources = ARRAY_SIZE(msm_camera_resources),
+	.flash_data = &flash_mt9e013,
+	.strobe_flash_data = &strobe_flash_xenon,
+	.sensor_platform_info = &mt9e013_sensor_8660_info,
+	.csi_if = 1
 };
+
 struct platform_device msm_camera_sensor_mt9e013 = {
-		.name	= "msm_camera_mt9e013",
-		.dev	= {
-			.platform_data = &msm_camera_sensor_mt9e013_data,
+	.name = "msm_camera_mt9e013",
+	.dev = {
+		.platform_data = &msm_camera_sensor_mt9e013_data,
 		},
 };
 #endif
@@ -2240,29 +2196,30 @@ static struct msm_camera_sensor_platform_info imx074_sensor_board_info = {
 };
 
 static struct msm_camera_sensor_flash_data flash_imx074 = {
-	.flash_type		= MSM_CAMERA_FLASH_LED,
-	.flash_src		= &msm_flash_src
+	.flash_type = MSM_CAMERA_FLASH_LED,
+	.flash_src = &msm_flash_src
 };
 
 static struct msm_camera_sensor_info msm_camera_sensor_imx074_data = {
-	.sensor_name		= "imx074",
-	.sensor_reset		= 106,
-	.sensor_pwd		= 85,
-	.vcm_pwd		= GPIO_AUX_CAM_2P7_EN,
-	.vcm_enable		= 1,
-	.pdata			= &msm_camera_device_data,
-	.resource		= msm_camera_resources,
-	.num_resources		= ARRAY_SIZE(msm_camera_resources),
-	.flash_data		= &flash_imx074,
-	.strobe_flash_data	= &strobe_flash_xenon,
+	.sensor_name = "imx074",
+	.sensor_reset = 106,
+	.sensor_pwd = 85,
+	.vcm_pwd = GPIO_AUX_CAM_2P7_EN,
+	.vcm_enable = 1,
+	.pdata = &msm_camera_device_data,
+	.resource = msm_camera_resources,
+	.num_resources = ARRAY_SIZE(msm_camera_resources),
+	.flash_data = &flash_imx074,
+	.strobe_flash_data = &strobe_flash_xenon,
 	.sensor_platform_info = &imx074_sensor_board_info,
-	.csi_if			= 1
+	.csi_if = 1
 };
+
 struct platform_device msm_camera_sensor_imx074 = {
-	.name	= "msm_camera_imx074",
-	.dev	= {
+	.name = "msm_camera_imx074",
+	.dev = {
 		.platform_data = &msm_camera_sensor_imx074_data,
-	},
+		},
 };
 #endif
 #ifdef CONFIG_WEBCAM_OV9726
@@ -2272,53 +2229,56 @@ static struct msm_camera_sensor_platform_info ov9726_sensor_8660_info = {
 };
 
 static struct msm_camera_sensor_flash_data flash_ov9726 = {
-	.flash_type	= MSM_CAMERA_FLASH_LED,
-	.flash_src	= &msm_flash_src
+	.flash_type = MSM_CAMERA_FLASH_LED,
+	.flash_src = &msm_flash_src
 };
+
 static struct msm_camera_sensor_info msm_camera_sensor_ov9726_data = {
-	.sensor_name	= "ov9726",
+	.sensor_name = "ov9726",
 	.sensor_reset_enable = 1,
-	.sensor_reset	= GPIO_FRONT_CAM_RESET_N,
-	.sensor_pwd	= 85,
-	.vcm_pwd	= 1,
-	.vcm_enable	= 0,
-	.pdata		= &msm_camera_device_data_web_cam,
-	.resource	= msm_camera_resources,
-	.num_resources	= ARRAY_SIZE(msm_camera_resources),
-	.flash_data	= &flash_ov9726,
+	.sensor_reset = GPIO_FRONT_CAM_RESET_N,
+	.sensor_pwd = 85,
+	.vcm_pwd = 1,
+	.vcm_enable = 0,
+	.pdata = &msm_camera_device_data_web_cam,
+	.resource = msm_camera_resources,
+	.num_resources = ARRAY_SIZE(msm_camera_resources),
+	.flash_data = &flash_ov9726,
 	.sensor_platform_info = &ov9726_sensor_8660_info,
-	.csi_if		= 1
+	.csi_if = 1
 };
+
 struct platform_device msm_camera_sensor_webcam_ov9726 = {
-	.name	= "msm_camera_ov9726",
-	.dev	= {
+	.name = "msm_camera_ov9726",
+	.dev = {
 		.platform_data = &msm_camera_sensor_ov9726_data,
-	},
+		},
 };
 #endif
 #ifdef CONFIG_WEBCAM_OV7692
 static struct msm_camera_sensor_flash_data flash_ov7692 = {
-	.flash_type		= MSM_CAMERA_FLASH_LED,
-	.flash_src		= &msm_flash_src
+	.flash_type = MSM_CAMERA_FLASH_LED,
+	.flash_src = &msm_flash_src
 };
+
 static struct msm_camera_sensor_info msm_camera_sensor_ov7692_data = {
-	.sensor_name	= "ov7692",
-	.sensor_reset	= GPIO_WEB_CAMIF_RESET_N,
-	.sensor_pwd	= 85,
-	.vcm_pwd	= 1,
-	.vcm_enable	= 0,
-	.pdata		= &msm_camera_device_data_web_cam,
-	.resource	= msm_camera_resources,
-	.num_resources	= ARRAY_SIZE(msm_camera_resources),
-	.flash_data	= &flash_ov7692,
-	.csi_if		= 1
+	.sensor_name = "ov7692",
+	.sensor_reset = GPIO_WEB_CAMIF_RESET_N,
+	.sensor_pwd = 85,
+	.vcm_pwd = 1,
+	.vcm_enable = 0,
+	.pdata = &msm_camera_device_data_web_cam,
+	.resource = msm_camera_resources,
+	.num_resources = ARRAY_SIZE(msm_camera_resources),
+	.flash_data = &flash_ov7692,
+	.csi_if = 1
 };
 
 static struct platform_device msm_camera_sensor_webcam_ov7692 = {
-	.name	= "msm_camera_ov7692",
-	.dev	= {
+	.name = "msm_camera_ov7692",
+	.dev = {
 		.platform_data = &msm_camera_sensor_ov7692_data,
-	},
+		},
 };
 #endif
 #ifdef CONFIG_VX6953
@@ -2327,28 +2287,29 @@ static struct msm_camera_sensor_platform_info vx6953_sensor_8660_info = {
 };
 
 static struct msm_camera_sensor_flash_data flash_vx6953 = {
-	.flash_type		= MSM_CAMERA_FLASH_NONE,
-	.flash_src		= &msm_flash_src
+	.flash_type = MSM_CAMERA_FLASH_NONE,
+	.flash_src = &msm_flash_src
 };
 
 static struct msm_camera_sensor_info msm_camera_sensor_vx6953_data = {
-	.sensor_name	= "vx6953",
-	.sensor_reset	= 63,
-	.sensor_pwd		= 63,
-	.vcm_pwd		= GPIO_AUX_CAM_2P7_EN,
-	.vcm_enable		= 1,
-	.pdata			= &msm_camera_device_data,
-	.resource		= msm_camera_resources,
-	.num_resources	= ARRAY_SIZE(msm_camera_resources),
-	.flash_data		= &flash_vx6953,
+	.sensor_name = "vx6953",
+	.sensor_reset = 63,
+	.sensor_pwd = 63,
+	.vcm_pwd = GPIO_AUX_CAM_2P7_EN,
+	.vcm_enable = 1,
+	.pdata = &msm_camera_device_data,
+	.resource = msm_camera_resources,
+	.num_resources = ARRAY_SIZE(msm_camera_resources),
+	.flash_data = &flash_vx6953,
 	.sensor_platform_info = &vx6953_sensor_8660_info,
-	.csi_if			= 1
+	.csi_if = 1
 };
+
 struct platform_device msm_camera_sensor_vx6953 = {
-	.name	= "msm_camera_vx6953",
-	.dev	= {
+	.name = "msm_camera_vx6953",
+	.dev = {
 		.platform_data = &msm_camera_sensor_vx6953_data,
-	},
+		},
 };
 #endif
 #ifdef CONFIG_QS_S5K4E1
@@ -2363,71 +2324,72 @@ static struct msm_camera_sensor_platform_info qs_s5k4e1_sensor_8660_info = {
 
 static char eeprom_data[864];
 static struct msm_camera_sensor_flash_data flash_qs_s5k4e1 = {
-	.flash_type		= MSM_CAMERA_FLASH_LED,
-	.flash_src		= &msm_flash_src
+	.flash_type = MSM_CAMERA_FLASH_LED,
+	.flash_src = &msm_flash_src
 };
 
 static struct msm_camera_sensor_info msm_camera_sensor_qs_s5k4e1_data = {
-	.sensor_name	= "qs_s5k4e1",
-	.sensor_reset	= 106,
-	.sensor_pwd		= 85,
-	.vcm_pwd		= 1,
-	.vcm_enable		= 0,
-	.pdata			= &msm_camera_device_data_qs_cam,
-	.resource		= msm_camera_resources,
-	.num_resources	= ARRAY_SIZE(msm_camera_resources),
-	.flash_data		= &flash_qs_s5k4e1,
-	.strobe_flash_data	= &strobe_flash_xenon,
+	.sensor_name = "qs_s5k4e1",
+	.sensor_reset = 106,
+	.sensor_pwd = 85,
+	.vcm_pwd = 1,
+	.vcm_enable = 0,
+	.pdata = &msm_camera_device_data_qs_cam,
+	.resource = msm_camera_resources,
+	.num_resources = ARRAY_SIZE(msm_camera_resources),
+	.flash_data = &flash_qs_s5k4e1,
+	.strobe_flash_data = &strobe_flash_xenon,
 	.sensor_platform_info = &qs_s5k4e1_sensor_8660_info,
-	.csi_if			= 1,
-	.eeprom_data	= eeprom_data,
+	.csi_if = 1,
+	.eeprom_data = eeprom_data,
 };
+
 struct platform_device msm_camera_sensor_qs_s5k4e1 = {
-	.name	= "msm_camera_qs_s5k4e1",
-	.dev	= {
+	.name = "msm_camera_qs_s5k4e1",
+	.dev = {
 		.platform_data = &msm_camera_sensor_qs_s5k4e1_data,
-	},
+		},
 };
 #endif
 static struct i2c_board_info msm_camera_boardinfo[] __initdata = {
-	#ifdef CONFIG_MT9E013
+#ifdef CONFIG_MT9E013
 	{
-		I2C_BOARD_INFO("mt9e013", 0x6C >> 2),
-	},
-	#endif
-	#ifdef CONFIG_IMX074
+	 I2C_BOARD_INFO("mt9e013", 0x6C >> 2),
+	 },
+#endif
+#ifdef CONFIG_IMX074
 	{
-		I2C_BOARD_INFO("imx074", 0x1A),
-	},
-	#endif
-	#ifdef CONFIG_WEBCAM_OV7692
+	 I2C_BOARD_INFO("imx074", 0x1A),
+	 },
+#endif
+#ifdef CONFIG_WEBCAM_OV7692
 	{
-		I2C_BOARD_INFO("ov7692", 0x78),
-	},
-	#endif
-	#ifdef CONFIG_WEBCAM_OV9726
+	 I2C_BOARD_INFO("ov7692", 0x78),
+	 },
+#endif
+#ifdef CONFIG_WEBCAM_OV9726
 	{
-		I2C_BOARD_INFO("ov9726", 0x10),
-	},
-	#endif
-	#ifdef CONFIG_QS_S5K4E1
+	 I2C_BOARD_INFO("ov9726", 0x10),
+	 },
+#endif
+#ifdef CONFIG_QS_S5K4E1
 	{
-		I2C_BOARD_INFO("qs_s5k4e1", 0x20),
-	},
-	#endif
+	 I2C_BOARD_INFO("qs_s5k4e1", 0x20),
+	 },
+#endif
 };
 
 static struct i2c_board_info msm_camera_dragon_boardinfo[] __initdata = {
-	#ifdef CONFIG_WEBCAM_OV9726
+#ifdef CONFIG_WEBCAM_OV9726
 	{
-		I2C_BOARD_INFO("ov9726", 0x10),
-	},
-	#endif
-	#ifdef CONFIG_VX6953
+	 I2C_BOARD_INFO("ov9726", 0x10),
+	 },
+#endif
+#ifdef CONFIG_VX6953
 	{
-		I2C_BOARD_INFO("vx6953", 0x20),
-	},
-	#endif
+	 I2C_BOARD_INFO("vx6953", 0x20),
+	 },
+#endif
 };
 #endif
 #endif
@@ -2435,21 +2397,21 @@ static struct i2c_board_info msm_camera_dragon_boardinfo[] __initdata = {
 #ifdef CONFIG_MSM_GEMINI
 static struct resource msm_gemini_resources[] = {
 	{
-		.start  = 0x04600000,
-		.end    = 0x04600000 + SZ_1M - 1,
-		.flags  = IORESOURCE_MEM,
-	},
+	 .start = 0x04600000,
+	 .end = 0x04600000 + SZ_1M - 1,
+	 .flags = IORESOURCE_MEM,
+	 },
 	{
-		.start  = INT_JPEG,
-		.end    = INT_JPEG,
-		.flags  = IORESOURCE_IRQ,
-	},
+	 .start = INT_JPEG,
+	 .end = INT_JPEG,
+	 .flags = IORESOURCE_IRQ,
+	 },
 };
 
 static struct platform_device msm_gemini_device = {
-	.name           = "msm_gemini",
-	.resource       = msm_gemini_resources,
-	.num_resources  = ARRAY_SIZE(msm_gemini_resources),
+	.name = "msm_gemini",
+	.resource = msm_gemini_resources,
+	.num_resources = ARRAY_SIZE(msm_gemini_resources),
 };
 #endif
 
@@ -2520,8 +2482,8 @@ static struct msm_psy_batt_pdata msm_psy_batt_data = {
 };
 
 static struct platform_device msm_batt_device = {
-	.name              = "msm-battery",
-	.id                = -1,
+	.name = "msm-battery",
+	.id = -1,
 	.dev.platform_data = &msm_psy_batt_data,
 };
 #endif
@@ -2540,32 +2502,32 @@ static struct platform_device msm_batt_device = {
 
 static struct dsps_gpio_info dsps_surf_gpios[] = {
 	{
-		.name = "compass_rst_n",
-		.num = GPIO_COMPASS_RST_N,
-		.on_val = 1,	/* device not in reset */
-		.off_val = 0,	/* device in reset */
-	},
+	 .name = "compass_rst_n",
+	 .num = GPIO_COMPASS_RST_N,
+	 .on_val = 1,		/* device not in reset */
+	 .off_val = 0,		/* device in reset */
+	 },
 	{
-		.name = "gpio_r_altimeter_reset_n",
-		.num = GPIO_R_ALTIMETER_RESET_N,
-		.on_val = 1,	/* device not in reset */
-		.off_val = 0,	/* device in reset */
-	}
+	 .name = "gpio_r_altimeter_reset_n",
+	 .num = GPIO_R_ALTIMETER_RESET_N,
+	 .on_val = 1,		/* device not in reset */
+	 .off_val = 0,		/* device in reset */
+	 }
 };
 
 static struct dsps_gpio_info dsps_fluid_gpios[] = {
 	{
-		.name = "gpio_n_altimeter_reset_n",
-		.num = GPIO_N_ALTIMETER_RESET_N,
-		.on_val = 1,	/* device not in reset */
-		.off_val = 0,	/* device in reset */
-	}
+	 .name = "gpio_n_altimeter_reset_n",
+	 .num = GPIO_N_ALTIMETER_RESET_N,
+	 .on_val = 1,		/* device not in reset */
+	 .off_val = 0,		/* device in reset */
+	 }
 };
 
 static void __init msm8x60_init_dsps(void)
 {
 	struct msm_dsps_platform_data *pdata =
-		msm_dsps_device.dev.platform_data;
+	    msm_dsps_device.dev.platform_data;
 	/*
 	 * On Fluid the Compass sensor Chip-Select (CS) is directly connected
 	 * to the power supply and not controled via GPIOs. Fluid uses a
@@ -2590,18 +2552,18 @@ static void __init msm8x60_init_dsps(void)
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MSM_FB_PRIM_BUF_SIZE \
-		(roundup((1024 * 600 * 4), 4096) * 3) /* 4 bpp x 3 pages */
+		(roundup((1024 * 600 * 4), 4096) * 3)	/* 4 bpp x 3 pages */
 #else
 #define MSM_FB_PRIM_BUF_SIZE \
-		(roundup((1024 * 600 * 4), 4096) * 2) /* 4 bpp x 2 pages */
+		(roundup((1024 * 600 * 4), 4096) * 2)	/* 4 bpp x 2 pages */
 #endif
 
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 #define MSM_FB_EXT_BUF_SIZE  \
-		(roundup((1920 * 1080 * 2), 4096) * 1) /* 2 bpp x 1 page */
+		(roundup((1920 * 1080 * 2), 4096) * 1)	/* 2 bpp x 1 page */
 #elif defined(CONFIG_FB_MSM_TVOUT)
 #define MSM_FB_EXT_BUF_SIZE  \
-		(roundup((720 * 576 * 2), 4096) * 2) /* 2 bpp x 2 pages */
+		(roundup((720 * 576 * 2), 4096) * 2)	/* 2 bpp x 2 pages */
 #else
 #define MSM_FB_EXT_BUF_SIZE	0
 #endif
@@ -2610,8 +2572,8 @@ static void __init msm8x60_init_dsps(void)
 #define MSM_FB_SIZE roundup(MSM_FB_PRIM_BUF_SIZE + MSM_FB_EXT_BUF_SIZE + \
 				MSM_FB_DSUB_PMEM_ADDER, 4096)
 
-#define MSM_PMEM_SF_SIZE 0x4000000 /* 64 Mbytes */
-#define MSM_HDMI_PRIM_PMEM_SF_SIZE 0x8000000 /* 128 Mbytes */
+#define MSM_PMEM_SF_SIZE 0x4000000	/* 64 Mbytes */
+#define MSM_HDMI_PRIM_PMEM_SF_SIZE 0x8000000	/* 128 Mbytes */
 
 #ifdef CONFIG_FB_MSM_HDMI_AS_PRIMARY
 unsigned char hdmi_is_primary = 1;
@@ -2623,13 +2585,13 @@ unsigned char hdmi_is_primary;
 #define MSM_FB_OVERLAY0_WRITEBACK_SIZE roundup((1376 * 768 * 3 * 2), 4096)
 #else
 #define MSM_FB_OVERLAY0_WRITEBACK_SIZE (0)
-#endif  /* CONFIG_FB_MSM_OVERLAY0_WRITEBACK */
+#endif /* CONFIG_FB_MSM_OVERLAY0_WRITEBACK */
 
 #ifdef CONFIG_FB_MSM_OVERLAY1_WRITEBACK
 #define MSM_FB_OVERLAY1_WRITEBACK_SIZE roundup((1920 * 1088 * 3 * 2), 4096)
 #else
 #define MSM_FB_OVERLAY1_WRITEBACK_SIZE (0)
-#endif  /* CONFIG_FB_MSM_OVERLAY1_WRITEBACK */
+#endif /* CONFIG_FB_MSM_OVERLAY1_WRITEBACK */
 
 #define MSM_PMEM_KERNEL_EBI1_SIZE  0x3BC000
 #define MSM_PMEM_ADSP_SIZE         0x4200000
@@ -2650,13 +2612,13 @@ unsigned char hdmi_is_primary;
 #define MSM_PMEM_SMIPOOL_SIZE USER_SMI_SIZE
 
 #ifdef CONFIG_MSM_CP
-#define MSM_ION_HOLE_SIZE	SZ_128K /* (128KB) */
+#define MSM_ION_HOLE_SIZE	SZ_128K	/* (128KB) */
 #else
 #define MSM_ION_HOLE_SIZE	0
 #endif
 
-#define MSM_MM_FW_SIZE		(0x200000 - MSM_ION_HOLE_SIZE) /*(2MB-128KB)*/
-#define MSM_ION_MM_SIZE		0x3800000  /* (56MB) */
+#define MSM_MM_FW_SIZE		(0x200000 - MSM_ION_HOLE_SIZE)	/*(2MB-128KB) */
+#define MSM_ION_MM_SIZE		0x3800000	/* (56MB) */
 #define MSM_ION_MFC_SIZE	SZ_8K
 
 #define MSM_MM_FW_BASE		MSM_SMI_BASE
@@ -2672,16 +2634,16 @@ unsigned char hdmi_is_primary;
 #define SECURE_SIZE	(MSM_ION_MM_SIZE + MSM_MM_FW_SIZE)
 #endif
 
-#define MSM_ION_SF_SIZE		0x4000000 /* 64MB */
+#define MSM_ION_SF_SIZE		0x4000000	/* 64MB */
 #define MSM_ION_CAMERA_SIZE     MSM_PMEM_ADSP_SIZE
 
 #ifdef CONFIG_FB_MSM_OVERLAY1_WRITEBACK
-#define MSM_ION_WB_SIZE		0xC00000 /* 12MB */
+#define MSM_ION_WB_SIZE		0xC00000	/* 12MB */
 #else
-#define MSM_ION_WB_SIZE		0x600000 /* 6MB */
+#define MSM_ION_WB_SIZE		0x600000	/* 6MB */
 #endif
 
-#define MSM_ION_QSECOM_SIZE	0x600000 /* (6MB) */
+#define MSM_ION_QSECOM_SIZE	0x600000	/* (6MB) */
 
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
 #define MSM_ION_AUDIO_SIZE	MSM_PMEM_AUDIO_SIZE
@@ -2698,6 +2660,7 @@ static int __init fb_size_setup(char *p)
 	fb_size = memparse(p, NULL);
 	return 0;
 }
+
 early_param("fb_size", fb_size_setup);
 
 static unsigned pmem_kernel_ebi1_size = MSM_PMEM_KERNEL_EBI1_SIZE;
@@ -2706,6 +2669,7 @@ static int __init pmem_kernel_ebi1_size_setup(char *p)
 	pmem_kernel_ebi1_size = memparse(p, NULL);
 	return 0;
 }
+
 early_param("pmem_kernel_ebi1_size", pmem_kernel_ebi1_size_setup);
 
 #ifdef CONFIG_ANDROID_PMEM
@@ -2715,6 +2679,7 @@ static int __init pmem_sf_size_setup(char *p)
 	pmem_sf_size = memparse(p, NULL);
 	return 0;
 }
+
 early_param("pmem_sf_size", pmem_sf_size_setup);
 
 static unsigned pmem_adsp_size = MSM_PMEM_ADSP_SIZE;
@@ -2724,6 +2689,7 @@ static int __init pmem_adsp_size_setup(char *p)
 	pmem_adsp_size = memparse(p, NULL);
 	return 0;
 }
+
 early_param("pmem_adsp_size", pmem_adsp_size_setup);
 
 static unsigned pmem_audio_size = MSM_PMEM_AUDIO_SIZE;
@@ -2733,13 +2699,14 @@ static int __init pmem_audio_size_setup(char *p)
 	pmem_audio_size = memparse(p, NULL);
 	return 0;
 }
+
 early_param("pmem_audio_size", pmem_audio_size_setup);
 #endif
 
 static struct resource msm_fb_resources[] = {
 	{
-		.flags  = IORESOURCE_DMA,
-	}
+	 .flags = IORESOURCE_DMA,
+	 }
 };
 
 static void set_mdp_clocks_for_wuxga(void);
@@ -2751,62 +2718,61 @@ static int msm_fb_detect_panel(const char *name)
 		if (SOCINFO_VERSION_MAJOR(soc_platform_version) < 3) {
 #ifdef CONFIG_FB_MSM_LCDC_SAMSUNG_OLED_PT
 			if (!strncmp(name, LCDC_SAMSUNG_OLED_PANEL_NAME,
-					strnlen(LCDC_SAMSUNG_OLED_PANEL_NAME,
-						PANEL_NAME_MAX_LEN)))
+				     strnlen(LCDC_SAMSUNG_OLED_PANEL_NAME,
+					     PANEL_NAME_MAX_LEN)))
 				return 0;
 #endif
-		} else { /*P3 and up use AUO panel */
+		} else {	/*P3 and up use AUO panel */
 #ifdef CONFIG_FB_MSM_LCDC_AUO_WVGA
 			if (!strncmp(name, LCDC_AUO_PANEL_NAME,
-					strnlen(LCDC_AUO_PANEL_NAME,
-						PANEL_NAME_MAX_LEN)))
+				     strnlen(LCDC_AUO_PANEL_NAME,
+					     PANEL_NAME_MAX_LEN)))
 				return 0;
 #endif
 		}
 #ifdef CONFIG_FB_MSM_LCDC_NT35582_WVGA
-	} else if machine_is_msm8x60_dragon() {
-	    if (!strncmp(name, LCDC_NT35582_PANEL_NAME,
-				strnlen(LCDC_NT35582_PANEL_NAME,
-					PANEL_NAME_MAX_LEN)))
+	} else if machine_is_msm8x60_dragon
+		() {
+		if (!strncmp(name, LCDC_NT35582_PANEL_NAME,
+			     strnlen(LCDC_NT35582_PANEL_NAME,
+				     PANEL_NAME_MAX_LEN)))
 			return 0;
 #endif
 	} else {
 		if (!strncmp(name, LCDC_SAMSUNG_WSVGA_PANEL_NAME,
-				strnlen(LCDC_SAMSUNG_WSVGA_PANEL_NAME,
-					PANEL_NAME_MAX_LEN)))
+			     strnlen(LCDC_SAMSUNG_WSVGA_PANEL_NAME,
+				     PANEL_NAME_MAX_LEN)))
 			return 0;
 
 #if !defined(CONFIG_FB_MSM_LCDC_AUTO_DETECT) && \
 	!defined(CONFIG_FB_MSM_MIPI_PANEL_AUTO_DETECT) && \
 	!defined(CONFIG_FB_MSM_LCDC_MIPI_PANEL_AUTO_DETECT)
 		if (!strncmp(name, MIPI_VIDEO_TOSHIBA_WVGA_PANEL_NAME,
-				strnlen(MIPI_VIDEO_TOSHIBA_WVGA_PANEL_NAME,
-					PANEL_NAME_MAX_LEN)))
+			     strnlen(MIPI_VIDEO_TOSHIBA_WVGA_PANEL_NAME,
+				     PANEL_NAME_MAX_LEN)))
 			return 0;
 
 		if (!strncmp(name, MIPI_VIDEO_NOVATEK_QHD_PANEL_NAME,
-				strnlen(MIPI_VIDEO_NOVATEK_QHD_PANEL_NAME,
-					  PANEL_NAME_MAX_LEN)))
+			     strnlen(MIPI_VIDEO_NOVATEK_QHD_PANEL_NAME,
+				     PANEL_NAME_MAX_LEN)))
 			return 0;
 
 		if (!strncmp(name, MIPI_CMD_NOVATEK_QHD_PANEL_NAME,
-				strnlen(MIPI_CMD_NOVATEK_QHD_PANEL_NAME,
-					PANEL_NAME_MAX_LEN)))
+			     strnlen(MIPI_CMD_NOVATEK_QHD_PANEL_NAME,
+				     PANEL_NAME_MAX_LEN)))
 			return 0;
 #endif
 	}
 
 	if (!strncmp(name, HDMI_PANEL_NAME,
-			strnlen(HDMI_PANEL_NAME,
-				PANEL_NAME_MAX_LEN))) {
+		     strnlen(HDMI_PANEL_NAME, PANEL_NAME_MAX_LEN))) {
 		if (hdmi_is_primary)
 			set_mdp_clocks_for_wuxga();
 		return 0;
 	}
 
 	if (!strncmp(name, TVOUT_PANEL_NAME,
-			strnlen(TVOUT_PANEL_NAME,
-				PANEL_NAME_MAX_LEN)))
+		     strnlen(TVOUT_PANEL_NAME, PANEL_NAME_MAX_LEN)))
 		return 0;
 
 	pr_warning("%s: not supported '%s'", __func__, name);
@@ -2818,10 +2784,10 @@ static struct msm_fb_platform_data msm_fb_pdata = {
 };
 
 static struct platform_device msm_fb_device = {
-	.name   = "msm_fb",
-	.id     = 0,
-	.num_resources     = ARRAY_SIZE(msm_fb_resources),
-	.resource          = msm_fb_resources,
+	.name = "msm_fb",
+	.id = 0,
+	.num_resources = ARRAY_SIZE(msm_fb_resources),
+	.resource = msm_fb_resources,
 	.dev.platform_data = &msm_fb_pdata,
 };
 
@@ -2850,7 +2816,7 @@ static struct android_pmem_platform_data android_pmem_adsp_pdata = {
 static struct platform_device android_pmem_adsp_device = {
 	.name = "android_pmem",
 	.id = 2,
-	.dev = { .platform_data = &android_pmem_adsp_pdata },
+	.dev = {.platform_data = &android_pmem_adsp_pdata},
 };
 
 static struct android_pmem_platform_data android_pmem_audio_pdata = {
@@ -2863,9 +2829,9 @@ static struct android_pmem_platform_data android_pmem_audio_pdata = {
 static struct platform_device android_pmem_audio_device = {
 	.name = "android_pmem",
 	.id = 4,
-	.dev = { .platform_data = &android_pmem_audio_pdata },
+	.dev = {.platform_data = &android_pmem_audio_pdata},
 };
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
+#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION */
 #define PMEM_BUS_WIDTH(_bw) \
 	{ \
 		.vectors = &(struct msm_bus_vectors){ \
@@ -2878,8 +2844,8 @@ static struct platform_device android_pmem_audio_device = {
 	}
 
 static struct msm_bus_paths mem_smi_table[] = {
-	[0] = PMEM_BUS_WIDTH(0), /* Off */
-	[1] = PMEM_BUS_WIDTH(1), /* On */
+	[0] = PMEM_BUS_WIDTH(0),	/* Off */
+	[1] = PMEM_BUS_WIDTH(1),	/* On */
 };
 
 static struct msm_bus_scale_pdata smi_client_pdata = {
@@ -2890,7 +2856,7 @@ static struct msm_bus_scale_pdata smi_client_pdata = {
 
 int request_smi_region(void *data)
 {
-	int bus_id = (int) data;
+	int bus_id = (int)data;
 
 	msm_bus_scale_client_update_request(bus_id, 1);
 	return 0;
@@ -2898,7 +2864,7 @@ int request_smi_region(void *data)
 
 int release_smi_region(void *data)
 {
-	int bus_id = (int) data;
+	int bus_id = (int)data;
 
 	msm_bus_scale_client_update_request(bus_id, 0);
 	return 0;
@@ -2908,6 +2874,7 @@ void *setup_smi_region(void)
 {
 	return (void *)msm_bus_scale_register_client(&smi_client_pdata);
 }
+
 #ifndef CONFIG_MSM_MULTIMEDIA_USE_ION
 static struct android_pmem_platform_data android_pmem_smipool_pdata = {
 	.name = "pmem_smipool",
@@ -2919,13 +2886,14 @@ static struct android_pmem_platform_data android_pmem_smipool_pdata = {
 	.setup_region = setup_smi_region,
 	.map_on_demand = 1,
 };
+
 static struct platform_device android_pmem_smipool_device = {
 	.name = "android_pmem",
 	.id = 7,
-	.dev = { .platform_data = &android_pmem_smipool_pdata },
+	.dev = {.platform_data = &android_pmem_smipool_pdata},
 };
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-#endif /*CONFIG_ANDROID_PMEM*/
+#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION */
+#endif /*CONFIG_ANDROID_PMEM */
 
 #define GPIO_DONGLE_PWR_EN 258
 static void setup_display_power(void);
@@ -2945,9 +2913,10 @@ static int vga_enable_request(int enable)
 #define GPIO_BACKLIGHT_PWM1 1
 
 static int pmic_backlight_gpio[2]
-	= { GPIO_BACKLIGHT_PWM0, GPIO_BACKLIGHT_PWM1 };
+= { GPIO_BACKLIGHT_PWM0, GPIO_BACKLIGHT_PWM1 };
+
 static struct msm_panel_common_pdata lcdc_samsung_panel_data = {
-	.gpio_num = pmic_backlight_gpio, /* two LPG CHANNELS for backlight */
+	.gpio_num = pmic_backlight_gpio,	/* two LPG CHANNELS for backlight */
 	.vga_switch = vga_enable_request,
 };
 
@@ -2956,8 +2925,9 @@ static struct platform_device lcdc_samsung_panel_device = {
 	.id = 0,
 	.dev = {
 		.platform_data = &lcdc_samsung_panel_data,
-	}
+		}
 };
+
 #if (!defined(CONFIG_SPI_QUP)) && \
 	(defined(CONFIG_FB_MSM_LCDC_SAMSUNG_OLED_PT) || \
 	defined(CONFIG_FB_MSM_LCDC_AUO_WVGA))
@@ -2970,11 +2940,11 @@ static int lcdc_spi_gpio_array_num[] = {
 
 static uint32_t lcdc_spi_gpio_config_data[] = {
 	GPIO_CFG(LCDC_SPI_GPIO_CLK, 0,
-			GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
+		 GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
 	GPIO_CFG(LCDC_SPI_GPIO_CS, 0,
-			GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
+		 GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
 	GPIO_CFG(LCDC_SPI_GPIO_MOSI, 0,
-			GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
+		 GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA),
 };
 
 static void lcdc_config_spi_gpios(int enable)
@@ -2989,25 +2959,25 @@ static void lcdc_config_spi_gpios(int enable)
 #ifdef CONFIG_SPI_QUP
 static struct spi_board_info lcdc_samsung_spi_board_info[] __initdata = {
 	{
-		.modalias       = LCDC_SAMSUNG_SPI_DEVICE_NAME,
-		.mode           = SPI_MODE_3,
-		.bus_num        = 1,
-		.chip_select    = 0,
-		.max_speed_hz   = 10800000,
-	}
+	 .modalias = LCDC_SAMSUNG_SPI_DEVICE_NAME,
+	 .mode = SPI_MODE_3,
+	 .bus_num = 1,
+	 .chip_select = 0,
+	 .max_speed_hz = 10800000,
+	 }
 };
 #endif /* CONFIG_SPI_QUP */
 
 static struct msm_panel_common_pdata lcdc_samsung_oled_panel_data = {
 #ifndef CONFIG_SPI_QUP
 	.panel_config_gpio = lcdc_config_spi_gpios,
-	.gpio_num          = lcdc_spi_gpio_array_num,
+	.gpio_num = lcdc_spi_gpio_array_num,
 #endif
 };
 
 static struct platform_device lcdc_samsung_oled_panel_device = {
-	.name   = LCDC_SAMSUNG_OLED_PANEL_NAME,
-	.id     = 0,
+	.name = LCDC_SAMSUNG_OLED_PANEL_NAME,
+	.id = 0,
 	.dev.platform_data = &lcdc_samsung_oled_panel_data,
 };
 #endif /*CONFIG_FB_MSM_LCDC_SAMSUNG_OLED_PT */
@@ -3016,28 +2986,28 @@ static struct platform_device lcdc_samsung_oled_panel_device = {
 #ifdef CONFIG_SPI_QUP
 static struct spi_board_info lcdc_auo_spi_board_info[] __initdata = {
 	{
-		.modalias       = LCDC_AUO_SPI_DEVICE_NAME,
-		.mode           = SPI_MODE_3,
-		.bus_num        = 1,
-		.chip_select    = 0,
-		.max_speed_hz   = 10800000,
-	}
+	 .modalias = LCDC_AUO_SPI_DEVICE_NAME,
+	 .mode = SPI_MODE_3,
+	 .bus_num = 1,
+	 .chip_select = 0,
+	 .max_speed_hz = 10800000,
+	 }
 };
 #endif
 
 static struct msm_panel_common_pdata lcdc_auo_wvga_panel_data = {
 #ifndef CONFIG_SPI_QUP
 	.panel_config_gpio = lcdc_config_spi_gpios,
-	.gpio_num          = lcdc_spi_gpio_array_num,
+	.gpio_num = lcdc_spi_gpio_array_num,
 #endif
 };
 
 static struct platform_device lcdc_auo_wvga_panel_device = {
-	.name   = LCDC_AUO_PANEL_NAME,
-	.id     = 0,
+	.name = LCDC_AUO_PANEL_NAME,
+	.id = 0,
 	.dev.platform_data = &lcdc_auo_wvga_panel_data,
 };
-#endif /*CONFIG_FB_MSM_LCDC_AUO_WVGA*/
+#endif /*CONFIG_FB_MSM_LCDC_AUO_WVGA */
 
 #ifdef CONFIG_FB_MSM_LCDC_NT35582_WVGA
 
@@ -3046,7 +3016,7 @@ static struct platform_device lcdc_auo_wvga_panel_device = {
 #define GPIO_NT35582_BL_EN	\
 	PM8058_GPIO_PM_TO_SYS(GPIO_NT35582_BL_EN_HW_PIN - 1)
 
-static int lcdc_nt35582_pmic_gpio[] = {GPIO_NT35582_BL_EN };
+static int lcdc_nt35582_pmic_gpio[] = { GPIO_NT35582_BL_EN };
 
 static struct msm_panel_common_pdata lcdc_nt35582_panel_data = {
 	.gpio_num = lcdc_nt35582_pmic_gpio,
@@ -3057,40 +3027,40 @@ static struct platform_device lcdc_nt35582_panel_device = {
 	.id = 0,
 	.dev = {
 		.platform_data = &lcdc_nt35582_panel_data,
-	}
+		}
 };
 
 static struct spi_board_info lcdc_nt35582_spi_board_info[] __initdata = {
 	{
-		.modalias     = "lcdc_nt35582_spi",
-		.mode         = SPI_MODE_0,
-		.bus_num      = 0,
-		.chip_select  = 0,
-		.max_speed_hz = 1100000,
-	}
+	 .modalias = "lcdc_nt35582_spi",
+	 .mode = SPI_MODE_0,
+	 .bus_num = 0,
+	 .chip_select = 0,
+	 .max_speed_hz = 1100000,
+	 }
 };
 #endif
 
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 static struct resource hdmi_msm_resources[] = {
 	{
-		.name  = "hdmi_msm_qfprom_addr",
-		.start = 0x00700000,
-		.end   = 0x007060FF,
-		.flags = IORESOURCE_MEM,
-	},
+	 .name = "hdmi_msm_qfprom_addr",
+	 .start = 0x00700000,
+	 .end = 0x007060FF,
+	 .flags = IORESOURCE_MEM,
+	 },
 	{
-		.name  = "hdmi_msm_hdmi_addr",
-		.start = 0x04A00000,
-		.end   = 0x04A00FFF,
-		.flags = IORESOURCE_MEM,
-	},
+	 .name = "hdmi_msm_hdmi_addr",
+	 .start = 0x04A00000,
+	 .end = 0x04A00FFF,
+	 .flags = IORESOURCE_MEM,
+	 },
 	{
-		.name  = "hdmi_msm_irq",
-		.start = HDMI_IRQ,
-		.end   = HDMI_IRQ,
-		.flags = IORESOURCE_IRQ,
-	},
+	 .name = "hdmi_msm_irq",
+	 .start = HDMI_IRQ,
+	 .end = HDMI_IRQ,
+	 .flags = IORESOURCE_IRQ,
+	 },
 };
 
 static int hdmi_enable_5v(int on);
@@ -3126,7 +3096,7 @@ static struct platform_device mipi_dsi_toshiba_panel_device = {
 #define FPGA_3D_GPIO_CONFIG_ADDR	0x1D00017A
 
 static struct mipi_dsi_panel_platform_data novatek_pdata = {
-	.fpga_3d_config_addr  = FPGA_3D_GPIO_CONFIG_ADDR,
+	.fpga_3d_config_addr = FPGA_3D_GPIO_CONFIG_ADDR,
 	.fpga_ctrl_mode = FPGA_EBI2_INTF,
 };
 
@@ -3135,7 +3105,38 @@ static struct platform_device mipi_dsi_novatek_panel_device = {
 	.id = 0,
 	.dev = {
 		.platform_data = &novatek_pdata,
+		}
+};
+#endif
+
+#ifdef CONFIG_LEDS_LM3530
+#define GPIO_LM3530_HWEN       10
+
+void lm3530_gpio_enable(int on)
+{
+	printk("%s: on %d\n", __func__, on);
+	if (on) {
+		gpio_request(GPIO_LM3530_HWEN, "lm3530 enable");
+		gpio_direction_output(GPIO_LM3530_HWEN, 1);
+	} else {
+		gpio_direction_output(GPIO_LM3530_HWEN, 0);
+		gpio_free(GPIO_LM3530_HWEN);
 	}
+}
+
+static struct lm3530_platform_data lm3530_pdata = {
+	.brt_val = 0x72,
+	.brt_ramp_law = 1,
+	.max_current = 0x5,
+	.mode = LM3530_BL_MODE_PWM_I2C,
+	.func = lm3530_gpio_enable,
+};
+
+static struct i2c_board_info lm3530_i2c_info[] = {
+	{
+	 I2C_BOARD_INFO(LM3530_NAME, 0x36),
+	 .platform_data = &lm3530_pdata,
+	 },
 };
 #endif
 
@@ -3163,13 +3164,13 @@ void __init msm8x60_set_display_params(char *prim_panel, char *ext_panel)
 		strlcpy(msm_fb_pdata.prim_panel_name, prim_panel,
 			PANEL_NAME_MAX_LEN);
 		pr_debug("msm_fb_pdata.prim_panel_name %s\n",
-			msm_fb_pdata.prim_panel_name);
+			 msm_fb_pdata.prim_panel_name);
 
 		if (!strncmp((char *)msm_fb_pdata.prim_panel_name,
-			HDMI_PANEL_NAME, strnlen(HDMI_PANEL_NAME,
-				PANEL_NAME_MAX_LEN))) {
+			     HDMI_PANEL_NAME, strnlen(HDMI_PANEL_NAME,
+						      PANEL_NAME_MAX_LEN))) {
 			pr_debug("HDMI is the primary display by"
-				" boot parameter\n");
+				 " boot parameter\n");
 			hdmi_is_primary = 1;
 			set_mdp_clocks_for_wuxga();
 		}
@@ -3178,7 +3179,7 @@ void __init msm8x60_set_display_params(char *prim_panel, char *ext_panel)
 		strlcpy(msm_fb_pdata.ext_panel_name, ext_panel,
 			PANEL_NAME_MAX_LEN);
 		pr_debug("msm_fb_pdata.ext_panel_name %s\n",
-			msm_fb_pdata.ext_panel_name);
+			 msm_fb_pdata.ext_panel_name);
 	}
 }
 
@@ -3186,20 +3187,21 @@ void __init msm8x60_set_display_params(char *prim_panel, char *ext_panel)
 		defined(CONFIG_TOUCHSCREEN_CYTTSP_I2C_QC_MODULE)
 /*virtual key support */
 static ssize_t tma300_vkeys_show(struct kobject *kobj,
-			struct kobj_attribute *attr, char *buf)
+				 struct kobj_attribute *attr, char *buf)
 {
 	return sprintf(buf,
-	__stringify(EV_KEY) ":" __stringify(KEY_BACK) ":60:900:90:120"
-	":" __stringify(EV_KEY) ":" __stringify(KEY_MENU) ":180:900:90:120"
-	":" __stringify(EV_KEY) ":" __stringify(KEY_HOME) ":300:900:90:120"
-	":" __stringify(EV_KEY) ":" __stringify(KEY_SEARCH) ":420:900:90:120"
-	"\n");
+		       __stringify(EV_KEY) ":" __stringify(KEY_BACK)
+		       ":60:900:90:120" ":" __stringify(EV_KEY) ":"
+		       __stringify(KEY_MENU) ":180:900:90:120" ":"
+		       __stringify(EV_KEY) ":" __stringify(KEY_HOME)
+		       ":300:900:90:120" ":" __stringify(EV_KEY) ":"
+		       __stringify(KEY_SEARCH) ":420:900:90:120" "\n");
 }
 
 static struct kobj_attribute tma300_vkeys_attr = {
 	.attr = {
-		.mode = S_IRUGO,
-	},
+		 .mode = S_IRUGO,
+		 },
 	.show = &tma300_vkeys_show,
 };
 
@@ -3214,8 +3216,6 @@ static struct attribute_group tma300_properties_attr_group = {
 
 static struct kobject *properties_kobj;
 
-
-
 #define CYTTSP_TS_GPIO_IRQ	61
 static int cyttsp_platform_init(struct i2c_client *client)
 {
@@ -3226,21 +3226,22 @@ static int cyttsp_platform_init(struct i2c_client *client)
 		pm8058_l5 = regulator_get(NULL, "8058_l5");
 		if (IS_ERR(pm8058_l5)) {
 			pr_err("%s: regulator get of 8058_l5 failed (%ld)\n",
-				__func__, PTR_ERR(pm8058_l5));
+			       __func__, PTR_ERR(pm8058_l5));
 			rc = PTR_ERR(pm8058_l5);
 			return rc;
 		}
 		rc = regulator_set_voltage(pm8058_l5, 2850000, 2850000);
 		if (rc) {
-			pr_err("%s: regulator_set_voltage of 8058_l5 failed(%d)\n",
-				__func__, rc);
+			pr_err
+			    ("%s: regulator_set_voltage of 8058_l5 failed(%d)\n",
+			     __func__, rc);
 			goto reg_l5_put;
 		}
 
 		rc = regulator_enable(pm8058_l5);
 		if (rc) {
 			pr_err("%s: regulator_enable of 8058_l5 failed(%d)\n",
-				__func__, rc);
+			       __func__, rc);
 			goto reg_l5_put;
 		}
 	}
@@ -3248,22 +3249,21 @@ static int cyttsp_platform_init(struct i2c_client *client)
 	pm8058_s3 = regulator_get(NULL, "8058_s3");
 	if (IS_ERR(pm8058_s3)) {
 		pr_err("%s: regulator get of 8058_s3 failed (%ld)\n",
-			__func__, PTR_ERR(pm8058_s3));
+		       __func__, PTR_ERR(pm8058_s3));
 		rc = PTR_ERR(pm8058_s3);
 		goto reg_l5_disable;
 	}
 
 	rc = regulator_set_voltage(pm8058_s3, 1800000, 1800000);
 	if (rc) {
-		pr_err("%s: regulator_set_voltage() = %d\n",
-			__func__, rc);
+		pr_err("%s: regulator_set_voltage() = %d\n", __func__, rc);
 		goto reg_s3_put;
 	}
 
 	rc = regulator_enable(pm8058_s3);
 	if (rc) {
 		pr_err("%s: regulator_enable of 8058_l5 failed(%d)\n",
-			__func__, rc);
+		       __func__, rc);
 		goto reg_s3_put;
 	}
 
@@ -3280,11 +3280,12 @@ static int cyttsp_platform_init(struct i2c_client *client)
 	/* virtual keys */
 	if (machine_is_msm8x60_fluid()) {
 		properties_kobj = kobject_create_and_add("board_properties",
-					NULL);
-		if (properties_kobj);
+							 NULL);
+		if (properties_kobj)
+			;
 		if (!properties_kobj || rc)
 			pr_err("%s: failed to create board_properties\n",
-					__func__);
+			       __func__);
 	}
 	return CY_OK;
 
@@ -3319,7 +3320,7 @@ static int cyttsp_platform_resume(struct i2c_client *client)
 
 static struct cyttsp_platform_data cyttsp_fluid_pdata = {
 	.flags = 0x04,
-	.gen = CY_GEN3,	/* or */
+	.gen = CY_GEN3,		/* or */
 	.use_st = CY_USE_ST,
 	.use_mt = CY_USE_MT,
 	.use_hndshk = CY_SEND_HNDSHK,
@@ -3330,8 +3331,7 @@ static struct cyttsp_platform_data cyttsp_fluid_pdata = {
 	 * and set active distance
 	 */
 	.gest_set = CY_GEST_GRP1 | CY_GEST_GRP2 |
-				CY_GEST_GRP3 | CY_GEST_GRP4 |
-				CY_ACT_DIST,
+	    CY_GEST_GRP3 | CY_GEST_GRP4 | CY_ACT_DIST,
 	/* change act_intrvl to customize the Active power state
 	 * scanning/processing refresh interval for Operating mode
 	 */
@@ -3362,7 +3362,7 @@ static struct cyttsp_platform_data cyttsp_tmg240_pdata = {
 	.correct_fw_ver = 8,
 	.fw_fname = "cyttsp_8660_ffa.hex",
 	.flags = 0x00,
-	.gen = CY_GEN2,	/* or */
+	.gen = CY_GEN2,		/* or */
 	.use_st = CY_USE_ST,
 	.use_mt = CY_USE_MT,
 	.use_hndshk = CY_SEND_HNDSHK,
@@ -3373,8 +3373,7 @@ static struct cyttsp_platform_data cyttsp_tmg240_pdata = {
 	 * and set active distance
 	 */
 	.gest_set = CY_GEST_GRP1 | CY_GEST_GRP2 |
-				CY_GEST_GRP3 | CY_GEST_GRP4 |
-				CY_ACT_DIST,
+	    CY_GEST_GRP3 | CY_GEST_GRP4 | CY_ACT_DIST,
 	/* change act_intrvl to customize the Active power state
 	 * scanning/processing refresh interval for Operating mode
 	 */
@@ -3395,6 +3394,7 @@ static struct cyttsp_platform_data cyttsp_tmg240_pdata = {
 	.init = cyttsp_platform_init,
 	.disable_ghost_det = true,
 };
+
 static void cyttsp_set_params(void)
 {
 	if (SOCINFO_VERSION_MAJOR(socinfo_get_platform_version()) < 3) {
@@ -3421,25 +3421,26 @@ static void cyttsp_set_params(void)
 
 static struct i2c_board_info cyttsp_fluid_info[] __initdata = {
 	{
-		I2C_BOARD_INFO(CY_I2C_NAME, 0x24),
-		.platform_data = &cyttsp_fluid_pdata,
+	 I2C_BOARD_INFO(CY_I2C_NAME, 0x24),
+	 .platform_data = &cyttsp_fluid_pdata,
 #ifndef CY_USE_TIMER
-		.irq = MSM_GPIO_TO_INT(CYTTSP_TS_GPIO_IRQ),
+	 .irq = MSM_GPIO_TO_INT(CYTTSP_TS_GPIO_IRQ),
 #endif /* CY_USE_TIMER */
-	},
+	 },
 };
 
 static struct i2c_board_info cyttsp_ffa_info[] __initdata = {
 	{
-		I2C_BOARD_INFO(CY_I2C_NAME, 0x3b),
-		.platform_data = &cyttsp_tmg240_pdata,
+	 I2C_BOARD_INFO(CY_I2C_NAME, 0x3b),
+	 .platform_data = &cyttsp_tmg240_pdata,
 #ifndef CY_USE_TIMER
-		.irq = MSM_GPIO_TO_INT(CYTTSP_TS_GPIO_IRQ),
+	 .irq = MSM_GPIO_TO_INT(CYTTSP_TS_GPIO_IRQ),
 #endif /* CY_USE_TIMER */
-	},
+	 },
 };
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_CY8C_TS
 static struct regulator *vreg_tmg200;
 
 #define TS_PEN_IRQ_GPIO 61
@@ -3449,15 +3450,15 @@ static int tmg200_power(int vreg_on)
 
 	if (!vreg_tmg200) {
 		printk(KERN_ERR "%s: regulator 8058_s3 not found (%d)\n",
-			__func__, rc);
+		       __func__, rc);
 		return rc;
 	}
 
 	rc = vreg_on ? regulator_enable(vreg_tmg200) :
-		  regulator_disable(vreg_tmg200);
+	    regulator_disable(vreg_tmg200);
 	if (rc < 0)
 		printk(KERN_ERR "%s: vreg 8058_s3 %s failed (%d)\n",
-				__func__, vreg_on ? "enable" : "disable", rc);
+		       __func__, vreg_on ? "enable" : "disable", rc);
 
 	/* wait for vregs to stabilize */
 	msleep(20);
@@ -3473,7 +3474,7 @@ static int tmg200_dev_setup(bool enable)
 		vreg_tmg200 = regulator_get(NULL, "8058_s3");
 		if (IS_ERR(vreg_tmg200)) {
 			pr_err("%s: regulator get of 8058_s3 failed (%ld)\n",
-				__func__, PTR_ERR(vreg_tmg200));
+			       __func__, PTR_ERR(vreg_tmg200));
 			rc = PTR_ERR(vreg_tmg200);
 			return rc;
 		}
@@ -3481,7 +3482,7 @@ static int tmg200_dev_setup(bool enable)
 		rc = regulator_set_voltage(vreg_tmg200, 1800000, 1800000);
 		if (rc) {
 			pr_err("%s: regulator_set_voltage() = %d\n",
-				__func__, rc);
+			       __func__, rc);
 			goto reg_put;
 		}
 	} else {
@@ -3515,9 +3516,9 @@ static struct cy8c_ts_platform_data cy8ctmg200_pdata = {
 
 static struct i2c_board_info cy8ctmg200_board_info[] = {
 	{
-		I2C_BOARD_INFO("cy8ctmg200", 0x2),
-		.platform_data = &cy8ctmg200_pdata,
-	}
+	 I2C_BOARD_INFO("cy8ctmg200", 0x2),
+	 .platform_data = &cy8ctmg200_pdata,
+	 }
 };
 
 static struct regulator *vreg_tma340;
@@ -3527,16 +3528,15 @@ static int tma340_power(int vreg_on)
 	int rc = -EINVAL;
 
 	if (!vreg_tma340) {
-		pr_err("%s: regulator 8901_l2 not found (%d)\n",
-			__func__, rc);
+		pr_err("%s: regulator 8901_l2 not found (%d)\n", __func__, rc);
 		return rc;
 	}
 
 	rc = vreg_on ? regulator_enable(vreg_tma340) :
-			regulator_disable(vreg_tma340);
+	    regulator_disable(vreg_tma340);
 	if (rc < 0)
 		pr_err("%s: vreg 8901_l2 %s failed (%d)\n",
-				__func__, vreg_on ? "enable" : "disable", rc);
+		       __func__, vreg_on ? "enable" : "disable", rc);
 
 	/* wait for vregs to stabilize */
 	msleep(100);
@@ -3554,7 +3554,7 @@ static int tma340_dragon_dev_setup(bool enable)
 		vreg_tma340 = regulator_get(NULL, "8901_l2");
 		if (IS_ERR(vreg_tma340)) {
 			pr_err("%s: regulator get of 8901_l2 failed (%ld)\n",
-				__func__, PTR_ERR(vreg_tma340));
+			       __func__, PTR_ERR(vreg_tma340));
 			rc = PTR_ERR(vreg_tma340);
 			return rc;
 		}
@@ -3562,17 +3562,18 @@ static int tma340_dragon_dev_setup(bool enable)
 		rc = regulator_set_voltage(vreg_tma340, 3300000, 3300000);
 		if (rc) {
 			pr_err("%s: regulator_set_voltage() = %d\n",
-				__func__, rc);
+			       __func__, rc);
 			goto reg_put;
 		}
 		tma340_prop_kobj = kobject_create_and_add("board_properties",
-					NULL);
+							  NULL);
 		if (tma340_prop_kobj) {
 			;
 			if (rc) {
 				kobject_put(tma340_prop_kobj);
-				pr_err("%s: failed to create board_properties\n",
-					__func__);
+				pr_err
+				    ("%s: failed to create board_properties\n",
+				     __func__);
 				goto reg_put;
 			}
 		}
@@ -3590,7 +3591,6 @@ reg_put:
 	regulator_put(vreg_tma340);
 	return rc;
 }
-
 
 static struct cy8c_ts_platform_data cy8ctma340_dragon_pdata = {
 	.ts_name = "cy8ctma340",
@@ -3613,16 +3613,538 @@ static struct cy8c_ts_platform_data cy8ctma340_dragon_pdata = {
 
 static struct i2c_board_info cy8ctma340_dragon_board_info[] = {
 	{
-		I2C_BOARD_INFO("cy8ctma340", 0x24),
-		.platform_data = &cy8ctma340_dragon_pdata,
-	}
+	 I2C_BOARD_INFO("cy8ctma340", 0x24),
+	 .platform_data = &cy8ctma340_dragon_pdata,
+	 }
 };
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_ATMEL_MXT
+#define ATMEL_MXT_INTR				50
+#define ATMEL_MXT_RESET				69
+
+static int atmel_mxt_setup(struct i2c_client *client,
+			   struct mxt_platform_data *pdata)
+{
+	int error;
+
+	/* reset device to good state */
+	error = gpio_request(ATMEL_MXT_RESET, "atmel_mxt_reset");
+	if (error < 0) {
+		pr_err("%s: gpio_request fail", __func__);
+		goto err;
+	}
+
+	error = gpio_direction_output(ATMEL_MXT_RESET, 0);
+	if (error < 0) {
+		pr_err("%s: gpio_direction_output fail", __func__);
+		goto err_free_resetpin;
+	}
+	msleep(1);
+	gpio_set_value(ATMEL_MXT_RESET, 1);
+
+	return 0;
+
+err_free_resetpin:
+	gpio_free(ATMEL_MXT_RESET);
+err:
+	return error;
+}
+
+static int atmel_mxt_teardown(struct i2c_client *client,
+			      struct mxt_platform_data *pdata)
+{
+	gpio_free(ATMEL_MXT_RESET);
+	return 0;
+}
+
+static const u8 atmel_power_config[] = {
+	0x19, 0x0c, 0x32,
+};
+
+static const u8 atmel_acquire_config[] = {
+	0x09, 0x00, 0x14, 0x14, 0x00, 0x00, 0x05, 0x14, 0x0a, 0xc0,
+};
+
+static const u8 atmel_multitouch_screen[] = {
+	0x08, 0x00, 0x00, 0x13, 0x0b, 0x00, 0x10, 0x32, 0x02, 0x01,
+	0x05, 0x04, 0x08, 0x5f, 0x0a, 0x05, 0x19, 0x10, 0x9c, 0x03,
+	0xdf, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd2, 0x5c,
+	0x10, 0x08,
+};
+
+static const u8 atmel_touch_keyarray[] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00,
+};
+
+static const u8 atmel_comms_config[] = {
+	0x04, 0x00,
+};
+
+static const u8 atmel_gpiopwm_config[] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+static const u8 atmel_gripface_suppress[] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00,
+};
+
+static const u8 atmel_noise_suppress[] = {
+	0x87, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2d, 0x00,
+	0x00, 0x0c, 0x16, 0x1c, 0xff, 0xff, 0x00,
+};
+
+static const u8 atmel_touch_proximity[] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+static const u8 atmel_onetouch_gesture[] = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+static const u8 atmel_selftest[] = {
+	0x00, 0x00, 0x28, 0x23, 0x70, 0x17, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+};
+
+static const u8 atmel_cte_config[] = {
+	0x00, 0x00, 0x03, 0x10, 0x20, 0x0a,
+};
+
+static const struct mxt_object_data atmel_object_data[] = {
+	{7, sizeof(atmel_power_config), atmel_power_config}
+	,
+	{8, sizeof(atmel_acquire_config), atmel_acquire_config}
+	,
+	{9, sizeof(atmel_multitouch_screen), atmel_multitouch_screen}
+	,
+	{15, sizeof(atmel_touch_keyarray), atmel_touch_keyarray}
+	,
+	{18, sizeof(atmel_comms_config), atmel_comms_config}
+	,
+	{19, sizeof(atmel_gpiopwm_config), atmel_gpiopwm_config}
+	,
+	{20, sizeof(atmel_gripface_suppress), atmel_gripface_suppress}
+	,
+	{22, sizeof(atmel_noise_suppress), atmel_noise_suppress}
+	,
+	{23, sizeof(atmel_touch_proximity), atmel_touch_proximity}
+	,
+	{24, sizeof(atmel_onetouch_gesture), atmel_onetouch_gesture}
+	,
+	{25, sizeof(atmel_selftest), atmel_selftest}
+	,
+	{28, sizeof(atmel_cte_config), atmel_cte_config}
+	,
+	{ /* terminate configuration list */ }
+	,
+};
+
+static const struct mxt_config_data atmel_config_data[] = {
+	{"", {0xa3, 0x76, 0x43}, atmel_object_data},	/* Wintek */
+	{"OFILM", {0xa3, 0x76, 0x43}, atmel_object_data},	/* O-Film */
+	{"LAIBAO", {0xa3, 0x76, 0x43}, atmel_object_data},	/* LaiBao */
+	{ /* terminate configuration list */ },
+};
+
+/* report KEY_HOMEPAGE for ICS, since in ICS Generic KeyLayout,
+  KEY_HOME is MOVEHOME, KEY_HOMEPAGE is HOME */
+static const unsigned int atmel_keypad_map[] = {
+	KEY_MENU, KEY_HOMEPAGE, KEY_BACK,
+};
+
+static const struct mxt_rect atmel_keypad_button[] = {
+	{10, 875, 100, 50},
+	{190, 875, 100, 50},
+	{370, 875, 100, 50},
+};
+
+static const struct mxt_keypad_data atmel_keypad_data = {
+	.length = 3,
+	.keymap = atmel_keypad_map,
+	.button = atmel_keypad_button,
+	.kparea = {10, 855, 460, 70},
+};
+
+static struct mxt_platform_data atmel_mxt_pdata = {
+	.config = atmel_config_data,
+	.keypad = &atmel_keypad_data,
+	.tcharea = {0, 0, 480, 854},
+	.irqpin = ATMEL_MXT_INTR,
+	.irqflags = IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+	.setup = atmel_mxt_setup,
+	.teardown = atmel_mxt_teardown,
+};
+
+static struct i2c_board_info atmel_mxt_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("mXT224", 0x4a),
+	 .irq = MSM_GPIO_TO_INT(ATMEL_MXT_INTR),
+	 .platform_data = &atmel_mxt_pdata,
+	 },
+};
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_FT5X0X_I2C
+#define FT5X0X_INTR				50
+#define FT5X0X_RESET				69
+
+/* report KEY_HOMEPAGE for ICS, since in ICS Generic KeyLayout,
+  KEY_HOME is MOVEHOME, KEY_HOMEPAGE is HOME */
+static const unsigned int ft5x0x_keypad_map[] = {
+	KEY_MENU, KEY_HOMEPAGE, KEY_BACK,
+};
+
+static const struct ft5x0x_rect ft5x0x_keypad_button[] = {
+	{10, 875, 100, 50},
+	{190, 875, 100, 50},
+	{370, 875, 100, 50},
+};
+
+static const struct ft5x0x_keypad_data ft5x0x_keypad_data = {
+	.length = 3,
+	.keymap = ft5x0x_keypad_map,
+	.button = ft5x0x_keypad_button,
+};
+
+static const u8 ft5x0x_firmware_ofilm_ito[] = {
+#include "ft5x0x_ofilm_ito.i"
+};
+
+static const u8 ft5x0x_firmware_ofilm_metal[] = {
+#include "ft5x0x_ofilm_metal.i"
+};
+
+static const u8 ft5x0x_firmware_unidisplay1[] = {
+#include "ft5x0x_unidisplay1.i"
+};
+
+static const u8 ft5x0x_firmware_unidisplay2[] = {
+#include "ft5x0x_unidisplay2.i"
+};
+
+static const u8 ft5x0x_firmware_unidisplay3[] = {
+#include "ft5x0x_unidisplay3.i"
+};
+
+static const struct ft5x0x_firmware_data ft5x0x_firmware_data[] = {
+	{0x51, ft5x0x_firmware_ofilm_metal, sizeof(ft5x0x_firmware_ofilm_metal)}
+	,
+	{0x79, ft5x0x_firmware_ofilm_metal, sizeof(ft5x0x_firmware_ofilm_metal)}
+	,
+	{0xa2, ft5x0x_firmware_unidisplay2, sizeof(ft5x0x_firmware_unidisplay2)}
+	,
+	{0xa3, ft5x0x_firmware_unidisplay1, sizeof(ft5x0x_firmware_unidisplay1)}
+	,
+	{0xa5, ft5x0x_firmware_ofilm_ito, sizeof(ft5x0x_firmware_ofilm_ito)}
+	,
+	{0xa8, ft5x0x_firmware_ofilm_metal, sizeof(ft5x0x_firmware_ofilm_metal)}
+	,
+	{0xb2, ft5x0x_firmware_unidisplay3, sizeof(ft5x0x_firmware_unidisplay3)}
+	,
+	{ /* terminate firmware list */ }
+	,
+};
+
+static struct ft5x0x_platform_data ft5x0x_pdata = {
+	.firmware = ft5x0x_firmware_data,
+	.keypad = &ft5x0x_keypad_data,
+	.tcharea = {0, 0, 480, 854},
+	.resetpin = FT5X0X_RESET,
+	.landing_jiffies = HZ / 8,
+	.landing_threshold = 32,
+	.staying_threshold = 16,
+};
+
+static struct i2c_board_info ft5x0x_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("ft5x0x_i2c", 0x38),
+	 .irq = MSM_GPIO_TO_INT(FT5X0X_INTR),
+	 .platform_data = &ft5x0x_pdata,
+	 },
+};
+#endif
+
+#ifdef CONFIG_RMI4_I2C
+#include "rmi_firmware_tpk_ito.h"
+
+#define RMI_INTR				50
+
+static int rmi_gpio_config(void *gpio_data, bool configure)
+{
+	int error = 0;
+
+	if (configure) {
+		error = gpio_request(RMI_INTR, "rmi_intr");
+		if (error < 0) {
+			pr_err("%s: gpio_request fail", __func__);
+			return error;
+		}
+
+		error = gpio_direction_input(RMI_INTR);
+		if (error < 0) {
+			pr_err("%s: gpio_direction_input fail", __func__);
+			gpio_free(RMI_INTR);
+			return error;
+		}
+	} else {
+		gpio_free(RMI_INTR);
+	}
+
+	return error;
+}
+
+static struct virtualbutton_map rmi_map[] = {
+	{10, 905, 100, 50, KEY_MENU},
+	{190, 905, 100, 50, KEY_HOMEPAGE},
+	{370, 905, 100, 50, KEY_BACK},
+};
+
+static struct rmi_f11_virtualbutton_map rmi_virtualbutton_map = {
+	.pad_X_low = 10,
+	.pad_Y_low = 854,
+	.pad_X_high = 469,
+	.pad_Y_high = 955,
+	.buttons = 3,
+	.map = rmi_map,
+};
+
+static struct rmi_f34_firmware rmi_firmware = {
+	.id = {0x30, 0x30, 0x30, 0x36},
+	.data = rmi_firmware_tpk_ito,
+	.size = sizeof(rmi_firmware_tpk_ito),
+};
+
+static struct rmi_device_platform_data rmi_pdata = {
+	.driver_name = "rmi_generic",
+	.sensor_name = "s3202",
+	.attn_gpio = RMI_INTR,
+	.attn_polarity = RMI_ATTN_ACTIVE_LOW,
+	.level_triggered = true,
+	.gpio_config = rmi_gpio_config,
+	.reset_delay_ms = 65,
+	.power_management = {
+			     .nosleep = RMI_F01_NOSLEEP_ON,
+			     },
+	.axis_align = {
+		       .lcd_Y_high = 853,
+		       .staying_threshold = 16,
+		       .landing_threshold = 32,
+		       .landing_jiffies = HZ / 8,
+		       },
+	.virtualbutton_map = &rmi_virtualbutton_map,
+	.firmware = &rmi_firmware,
+};
+
+static struct i2c_board_info rmi_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("rmi_i2c", 0x22),
+	 .platform_data = &rmi_pdata,
+	 },
+};
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4
+#define SYNAPTICS_INTR			 50
+
+static const unsigned int synaptics_keypad_map[] = {
+	KEY_MENU, KEY_HOMEPAGE, KEY_BACK,
+};
+
+static const struct synaptics_rmi4_rect synaptics_keypad_button[] = {
+	{10, 875, 100, 50},
+	{190, 875, 100, 50},
+	{370, 875, 100, 50},
+};
+
+static const struct synaptics_rmi4_keypad_data synaptics_keypad_data = {
+	.length = 3,
+	.keymap = synaptics_keypad_map,
+	.button = synaptics_keypad_button,
+	.kparea = {10, 855, 460, 70},
+};
+
+#include "synaptics_firmware_ito.h"
+#include "synaptics_firmware_metal.h"
+
+static const struct synaptics_rmi4_firmware_data synaptics_firmware_data[] = {
+	{synaptics_firmware_ito, sizeof(synaptics_firmware_ito)}
+	,
+	{synaptics_firmware_metal, sizeof(synaptics_firmware_metal)}
+	,
+	{ /* terminate firmware list */ }
+	,
+};
+
+static struct synaptics_rmi4_platform_data synaptics_pdata = {
+	.irq_number = MSM_GPIO_TO_INT(SYNAPTICS_INTR),
+	.irq_type = IRQF_TRIGGER_FALLING,
+	.irq_pin = SYNAPTICS_INTR,
+	.y_flip = true,
+	.sensor_max_x = 480,
+	.sensor_max_y = 925,
+	.moving_threshold = 2,
+	.staying_threshold = 16,
+	.landing_threshold = 32,
+	.landing_jiffies = HZ / 8,
+	.tcharea = {0, 0, 480, 854},
+	.keypad = &synaptics_keypad_data,
+	.firmware = synaptics_firmware_data,
+};
+
+static struct i2c_board_info synaptics_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("synaptics_rmi4_i2c", 0x20),
+	 .platform_data = &synaptics_pdata,
+	 },
+};
+#endif
+
+#ifdef CONFIG_SENSORS_HMC5883L
+static struct hmc5883l_platform_data hmc5883l_pdata = {
+	.xdir = -1,
+	.ydir = 1,
+	.zdir = 1,
+	.xcode = ABS_Y,
+	.ycode = ABS_X,
+	.zcode = ABS_Z,
+	.period = 200000000,
+	.threshold = 75,
+};
+
+static struct i2c_board_info hmc5883l_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("hmc5883l", 0x1e),
+	 .platform_data = &hmc5883l_pdata,
+	 .irq = MSM_GPIO_TO_INT(67),
+	 },
+};
+#endif
+
+#ifdef CONFIG_SENSORS_ISL29028
+static struct isl29028_platform_data isl29028_pdata = {
+	.als_factor = 10,
+	.als_highrange = 2,
+	.als_lowthres = 0x0e0,
+	.als_highthres = 0xf80,
+	.als_sensitive = 25,
+
+	.prox_period = 100000000,
+	.prox_null_value = 70,
+	.prox_lowthres_offset = 50,
+	.prox_threswindow = 30,
+};
+
+static struct i2c_board_info isl29028_i2c_info_1[] __initdata = {
+	{
+	 I2C_BOARD_INFO("isl29028", 0x44),
+	 .platform_data = &isl29028_pdata,
+	 .irq = MSM_GPIO_TO_INT(124),
+	 },
+};
+
+static struct i2c_board_info isl29028_i2c_info_2[] __initdata = {
+	{
+	 I2C_BOARD_INFO("isl29028", 0x45),
+	 .platform_data = &isl29028_pdata,
+	 .irq = MSM_GPIO_TO_INT(124),
+	 },
+};
+#endif
+
+#ifdef CONFIG_SENSORS_LIS3DH
+static struct lis3dh_platform_data lis3dh_pdata = {
+	.xdir = -1,
+	.ydir = -1,
+	.zdir = 1,
+	.xcode = ABS_X,
+	.ycode = ABS_Y,
+	.zcode = ABS_Z,
+	.period = 200000000,
+	.thres_6d = 800,
+	.count_6d = 5,
+	.low_thres = 0x3e00,
+	.high_thres = 0x7e00,
+};
+
+static struct i2c_board_info lis3dh_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("lis3dh", 0x18),
+	 .platform_data = &lis3dh_pdata,
+	 .irq = MSM_GPIO_TO_INT(123),
+	 },
+};
+#endif
+
+#ifdef CONFIG_SENSORS_LSM303D
+static struct lsm303d_platform_data lsm303d_pdata = {
+	.mag_xdir = -1,
+	.mag_ydir = 1,
+	.mag_zdir = 1,
+	.mag_xcode = ABS_Y,
+	.mag_ycode = ABS_X,
+	.mag_zcode = ABS_Z,
+	.mag_period = 200000000,
+	.mag_lowthres = 0x3e00,
+	.mag_highthres = 0x7e00,
+	.acc_xdir = -1,
+	.acc_ydir = 1,
+	.acc_zdir = 1,
+	.acc_xcode = ABS_Y,
+	.acc_ycode = ABS_X,
+	.acc_zcode = ABS_Z,
+	.acc_period = 200000000,
+	.acc_lowthres = 0x3e00,
+	.acc_highthres = 0x7e00,
+};
+
+static struct i2c_board_info lsm303d_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("lsm303d", 0x1d),
+	 .platform_data = &lsm303d_pdata,
+	 .irq = MSM_GPIO_TO_INT(123),
+	 },
+};
+#endif
+
+#ifdef CONFIG_SENSORS_BMC055
+static struct bmc055_platform_data bmc055_pdata = {
+	.mag_xdir = -1,
+	.mag_ydir = 1,
+	.mag_zdir = 1,
+	.mag_xcode = ABS_Y,
+	.mag_ycode = ABS_X,
+	.mag_zcode = ABS_Z,
+	.mag_period = 200000000,
+	.acc_xdir = -1,
+	.acc_ydir = 1,
+	.acc_zdir = 1,
+	.acc_xcode = ABS_Y,
+	.acc_ycode = ABS_X,
+	.acc_zcode = ABS_Z,
+	.acc_period = 200000000,
+	.acc_scale = 2000,	/* 2G */
+};
+
+static struct i2c_board_info bmc055_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("bmc055", 0x11),
+	 .platform_data = &bmc055_pdata,
+	 .irq = MSM_GPIO_TO_INT(123),
+	 },
+};
+#endif
 
 #ifdef CONFIG_SERIAL_MSM_HS
 static int configure_uart_gpios(int on)
 {
 	int ret = 0, i;
-	int uart_gpios[] = {53, 54, 55, 56};
+	int uart_gpios[] = { 53, 54, 55, 56 };
 	for (i = 0; i < ARRAY_SIZE(uart_gpios); i++) {
 		if (on) {
 			ret = msm_gpiomux_get(uart_gpios[i]);
@@ -3639,87 +4161,86 @@ static int configure_uart_gpios(int on)
 			msm_gpiomux_put(uart_gpios[i]);
 	return ret;
 }
+
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
-       .inject_rx_on_wakeup = 1,
-       .rx_to_inject = 0xFD,
-       .gpio_config = configure_uart_gpios,
+	.gpio_config = configure_uart_gpios,
+	.exit_lpm_cb = bcm_bt_lpm_exit_lpm_locked,
 };
 #endif
-
 
 #if defined(CONFIG_GPIO_SX150X) || defined(CONFIG_GPIO_SX150X_MODULE)
 
 static struct gpio_led gpio_exp_leds_config[] = {
 	{
-		.name = "left_led1:green",
-		.gpio = GPIO_LEFT_LED_1,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "left_led1:green",
+	 .gpio = GPIO_LEFT_LED_1,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "left_led2:red",
-		.gpio = GPIO_LEFT_LED_2,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "left_led2:red",
+	 .gpio = GPIO_LEFT_LED_2,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "left_led3:green",
-		.gpio = GPIO_LEFT_LED_3,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "left_led3:green",
+	 .gpio = GPIO_LEFT_LED_3,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "wlan_led:orange",
-		.gpio = GPIO_LEFT_LED_WLAN,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "wlan_led:orange",
+	 .gpio = GPIO_LEFT_LED_WLAN,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "left_led5:green",
-		.gpio = GPIO_LEFT_LED_5,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "left_led5:green",
+	 .gpio = GPIO_LEFT_LED_5,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "right_led1:green",
-		.gpio = GPIO_RIGHT_LED_1,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "right_led1:green",
+	 .gpio = GPIO_RIGHT_LED_1,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "right_led2:red",
-		.gpio = GPIO_RIGHT_LED_2,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "right_led2:red",
+	 .gpio = GPIO_RIGHT_LED_2,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "right_led3:green",
-		.gpio = GPIO_RIGHT_LED_3,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "right_led3:green",
+	 .gpio = GPIO_RIGHT_LED_3,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "bt_led:blue",
-		.gpio = GPIO_RIGHT_LED_BT,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "bt_led:blue",
+	 .gpio = GPIO_RIGHT_LED_BT,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 	{
-		.name = "right_led5:green",
-		.gpio = GPIO_RIGHT_LED_5,
-		.active_low = 1,
-		.retain_state_suspended = 0,
-		.default_state = LEDS_GPIO_DEFSTATE_OFF,
-	},
+	 .name = "right_led5:green",
+	 .gpio = GPIO_RIGHT_LED_5,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 },
 };
 
 static struct gpio_led_platform_data gpio_leds_pdata = {
@@ -3728,51 +4249,87 @@ static struct gpio_led_platform_data gpio_leds_pdata = {
 };
 
 static struct platform_device gpio_leds = {
-	.name          = "leds-gpio",
-	.id            = -1,
-	.dev           = {
+	.name = "leds-gpio",
+	.id = -1,
+	.dev = {
 		.platform_data = &gpio_leds_pdata,
-	},
+		},
 };
 
 static struct gpio_led fluid_gpio_leds[] = {
 	{
-		.name			= "dual_led:green",
-		.gpio			= GPIO_LED1_GREEN_N,
-		.default_state		= LEDS_GPIO_DEFSTATE_OFF,
-		.active_low		= 1,
-		.retain_state_suspended = 0,
-	},
+	 .name = "dual_led:green",
+	 .gpio = GPIO_LED1_GREEN_N,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 },
 	{
-		.name			= "dual_led:red",
-		.gpio			= GPIO_LED2_RED_N,
-		.default_state		= LEDS_GPIO_DEFSTATE_OFF,
-		.active_low		= 1,
-		.retain_state_suspended = 0,
-	},
+	 .name = "dual_led:red",
+	 .gpio = GPIO_LED2_RED_N,
+	 .default_state = LEDS_GPIO_DEFSTATE_OFF,
+	 .active_low = 1,
+	 .retain_state_suspended = 0,
+	 },
 };
 
 static struct gpio_led_platform_data gpio_led_pdata = {
-	.leds		= fluid_gpio_leds,
-	.num_leds	= ARRAY_SIZE(fluid_gpio_leds),
+	.leds = fluid_gpio_leds,
+	.num_leds = ARRAY_SIZE(fluid_gpio_leds),
 };
 
 static struct platform_device fluid_leds_gpio = {
-	.name	= "leds-gpio",
-	.id	= -1,
-	.dev	= {
-		.platform_data	= &gpio_led_pdata,
-	},
+	.name = "leds-gpio",
+	.id = -1,
+	.dev = {
+		.platform_data = &gpio_led_pdata,
+		},
 };
 
 #endif
 
+#ifdef CONFIG_BATTERY_MAX17043
+static const u8 max17043_batt_model[] = {
+	0x7D, 0x00, 0xB1, 0x50, 0xB9, 0x20, 0xBA,
+	0x00, 0xBB, 0x80, 0xBC, 0x00, 0xBC, 0x50, 0xBC, 0x70, 0xBD, 0x20, 0xBE,
+	    0x70,
+	0xBF, 0xA0, 0xC3, 0x90, 0xC5, 0xB0, 0xC7, 0xE0, 0xCC, 0x80, 0xD0, 0xD0,
+	    0x00,
+	0x20, 0x0A, 0x50, 0x4B, 0xC0, 0x00, 0x70, 0x69, 0x10, 0x8B, 0x10, 0x9F,
+	    0xD0,
+	0x42, 0x20, 0x23, 0x90, 0x38, 0xF0, 0x17, 0xF0, 0x19, 0xF0, 0x19, 0xF0,
+	    0x12,
+	0x80, 0x12, 0xE0, 0x12, 0xE0,
+};
+
+static struct max17043_platform_data max17043_pdata = {
+	.ready = 0,
+	.rcomp_value = 114,
+	.bit = 19,
+	.soc_checkA = 246,
+	.soc_checkB = 248,
+	.ocv_test = 56016,
+	.unlock = 0x4A57,
+	.temp_cold_up = -1475,
+	.temp_cold_down = -4325,
+	.model = max17043_batt_model,
+};
+
+static struct i2c_board_info max17043_battery_i2c_info[] __initdata = {
+	{
+	 I2C_BOARD_INFO("max17043", 0x6C >> 1),
+	 .platform_data = &max17043_pdata,
+	 .irq = MSM_GPIO_TO_INT(63),
+	 },
+};
+#endif
+
 #ifdef CONFIG_BATTERY_MSM8X60
 static struct msm_charger_platform_data msm_charger_data = {
-	.safety_time = 180,
+	.safety_time = 480,
 	.update_time = 1,
 	.max_voltage = 4200,
-	.min_voltage = 3200,
+	.min_voltage = 3400,
 };
 
 static struct platform_device msm_charger_device = {
@@ -3780,7 +4337,7 @@ static struct platform_device msm_charger_device = {
 	.id = -1,
 	.dev = {
 		.platform_data = &msm_charger_data,
-	}
+		}
 };
 #endif
 
@@ -3789,181 +4346,248 @@ static struct platform_device msm_charger_device = {
  *			 regulator name		consumer dev_name
  */
 static struct regulator_consumer_supply vreg_consumers_PM8058_L0[] = {
-	REGULATOR_SUPPLY("8058_l0",		NULL),
+	REGULATOR_SUPPLY("8058_l0", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L1[] = {
-	REGULATOR_SUPPLY("8058_l1",		NULL),
+	REGULATOR_SUPPLY("8058_l1", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L2[] = {
-	REGULATOR_SUPPLY("8058_l2",		NULL),
+	REGULATOR_SUPPLY("8058_l2", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L3[] = {
-	REGULATOR_SUPPLY("8058_l3",		NULL),
+	REGULATOR_SUPPLY("8058_l3", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L4[] = {
-	REGULATOR_SUPPLY("8058_l4",		NULL),
+	REGULATOR_SUPPLY("8058_l4", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L5[] = {
-	REGULATOR_SUPPLY("8058_l5",		NULL),
+	REGULATOR_SUPPLY("8058_l5", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L6[] = {
-	REGULATOR_SUPPLY("8058_l6",		NULL),
+	REGULATOR_SUPPLY("8058_l6", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L7[] = {
-	REGULATOR_SUPPLY("8058_l7",		NULL),
+	REGULATOR_SUPPLY("8058_l7", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L8[] = {
-	REGULATOR_SUPPLY("8058_l8",		NULL),
+	REGULATOR_SUPPLY("8058_l8", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L9[] = {
-	REGULATOR_SUPPLY("8058_l9",		NULL),
+	REGULATOR_SUPPLY("8058_l9", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L10[] = {
-	REGULATOR_SUPPLY("8058_l10",		NULL),
+	REGULATOR_SUPPLY("8058_l10", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L11[] = {
-	REGULATOR_SUPPLY("8058_l11",		NULL),
+	REGULATOR_SUPPLY("8058_l11", NULL),
+	REGULATOR_SUPPLY("cam_vvcm", "1-001a"),
+	REGULATOR_SUPPLY("cam_vvcm", "1-0020"),
+	REGULATOR_SUPPLY("cam_vvcm", "1-0036"),
+	REGULATOR_SUPPLY("cam_vvcm", "1-006c"),
+	REGULATOR_SUPPLY("cam_vvcm", "1-006e"),
+	REGULATOR_SUPPLY("cam_vvcm", "1-0078"),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L12[] = {
-	REGULATOR_SUPPLY("8058_l12",		NULL),
+	REGULATOR_SUPPLY("8058_l12", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L13[] = {
-	REGULATOR_SUPPLY("8058_l13",		NULL),
+	REGULATOR_SUPPLY("8058_l13", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L14[] = {
-	REGULATOR_SUPPLY("8058_l14",		NULL),
+	REGULATOR_SUPPLY("8058_l14", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L15[] = {
-	REGULATOR_SUPPLY("8058_l15",		NULL),
-	REGULATOR_SUPPLY("cam_vana",		"1-001a"),
-	REGULATOR_SUPPLY("cam_vana",		"1-006c"),
-	REGULATOR_SUPPLY("cam_vana",		"1-0078"),
+	REGULATOR_SUPPLY("8058_l15", NULL),
+	REGULATOR_SUPPLY("cam_vana", "1-001a"),
+	REGULATOR_SUPPLY("cam_vana", "1-0020"),
+	REGULATOR_SUPPLY("cam_vana", "1-0036"),
+	REGULATOR_SUPPLY("cam_vana", "1-006c"),
+	REGULATOR_SUPPLY("cam_vana", "1-006e"),
+	REGULATOR_SUPPLY("cam_vana", "1-0078"),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L16[] = {
-	REGULATOR_SUPPLY("8058_l16",		NULL),
+	REGULATOR_SUPPLY("8058_l16", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L17[] = {
-	REGULATOR_SUPPLY("8058_l17",		NULL),
+	REGULATOR_SUPPLY("8058_l17", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L18[] = {
-	REGULATOR_SUPPLY("8058_l18",		NULL),
+	REGULATOR_SUPPLY("8058_l18", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L19[] = {
-	REGULATOR_SUPPLY("8058_l19",		NULL),
+	REGULATOR_SUPPLY("8058_l19", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L20[] = {
-	REGULATOR_SUPPLY("8058_l20",		NULL),
+	REGULATOR_SUPPLY("8058_l20", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L21[] = {
-	REGULATOR_SUPPLY("8058_l21",		NULL),
+	REGULATOR_SUPPLY("8058_l21", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L22[] = {
-	REGULATOR_SUPPLY("8058_l22",		NULL),
+	REGULATOR_SUPPLY("8058_l22", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L23[] = {
-	REGULATOR_SUPPLY("8058_l23",		NULL),
+	REGULATOR_SUPPLY("8058_l23", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L24[] = {
-	REGULATOR_SUPPLY("8058_l24",		NULL),
+	REGULATOR_SUPPLY("8058_l24", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L25[] = {
-	REGULATOR_SUPPLY("8058_l25",		NULL),
-	REGULATOR_SUPPLY("cam_vdig",		"1-001a"),
-	REGULATOR_SUPPLY("cam_vdig",		"1-006c"),
-	REGULATOR_SUPPLY("cam_vdig",		"1-0078"),
+	REGULATOR_SUPPLY("8058_l25", NULL),
+	REGULATOR_SUPPLY("cam_vdig1", "1-001a"),
+	REGULATOR_SUPPLY("cam_vdig1", "1-006c"),
+	REGULATOR_SUPPLY("cam_vdig1", "1-0078"),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_S0[] = {
-	REGULATOR_SUPPLY("8058_s0",		NULL),
+	REGULATOR_SUPPLY("8058_s0", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_S1[] = {
-	REGULATOR_SUPPLY("8058_s1",		NULL),
+	REGULATOR_SUPPLY("8058_s1", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_S2[] = {
-	REGULATOR_SUPPLY("8058_s2",		NULL),
+	REGULATOR_SUPPLY("8058_s2", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_S3[] = {
-	REGULATOR_SUPPLY("8058_s3",		NULL),
+	REGULATOR_SUPPLY("8058_s3", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_S4[] = {
-	REGULATOR_SUPPLY("8058_s4",		NULL),
+	REGULATOR_SUPPLY("8058_s4", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_LVS0[] = {
-	REGULATOR_SUPPLY("8058_lvs0",		NULL),
-	REGULATOR_SUPPLY("cam_vio",			"1-001a"),
-	REGULATOR_SUPPLY("cam_vio",			"1-006c"),
-	REGULATOR_SUPPLY("cam_vio",			"1-0078"),
+	REGULATOR_SUPPLY("8058_lvs0", NULL),
+	REGULATOR_SUPPLY("cam_vio", "1-001a"),
+	REGULATOR_SUPPLY("cam_vio", "1-0020"),
+	REGULATOR_SUPPLY("cam_vio", "1-0036"),
+	REGULATOR_SUPPLY("cam_vio", "1-006c"),
+	REGULATOR_SUPPLY("cam_vio", "1-006e"),
+	REGULATOR_SUPPLY("cam_vio", "1-0078"),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_LVS1[] = {
-	REGULATOR_SUPPLY("8058_lvs1",		NULL),
+	REGULATOR_SUPPLY("8058_lvs1", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_NCP[] = {
-	REGULATOR_SUPPLY("8058_ncp",		NULL),
+	REGULATOR_SUPPLY("8058_ncp", NULL),
 };
 
 static struct regulator_consumer_supply vreg_consumers_PM8901_L0[] = {
-	REGULATOR_SUPPLY("8901_l0",		NULL),
+	REGULATOR_SUPPLY("8901_l0", NULL),
+	REGULATOR_SUPPLY("cam_vdig", "1-006e"),
+	REGULATOR_SUPPLY("cam_vdig", "1-0020"),
+	REGULATOR_SUPPLY("cam_vdig", "1-0036"),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_L1[] = {
-	REGULATOR_SUPPLY("8901_l1",		NULL),
+	REGULATOR_SUPPLY("8901_l1", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_L2[] = {
-	REGULATOR_SUPPLY("8901_l2",		NULL),
+	REGULATOR_SUPPLY("8901_l2", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_L3[] = {
-	REGULATOR_SUPPLY("8901_l3",		NULL),
+	REGULATOR_SUPPLY("8901_l3", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_L4[] = {
-	REGULATOR_SUPPLY("8901_l4",		NULL),
+	REGULATOR_SUPPLY("8901_l4", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_L5[] = {
-	REGULATOR_SUPPLY("8901_l5",		NULL),
+	REGULATOR_SUPPLY("8901_l5", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_L6[] = {
-	REGULATOR_SUPPLY("8901_l6",		NULL),
+	REGULATOR_SUPPLY("8901_l6", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_S2[] = {
-	REGULATOR_SUPPLY("8901_s2",		NULL),
+	REGULATOR_SUPPLY("8901_s2", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_S3[] = {
-	REGULATOR_SUPPLY("8901_s3",		NULL),
+	REGULATOR_SUPPLY("8901_s3", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_S4[] = {
-	REGULATOR_SUPPLY("8901_s4",		NULL),
+	REGULATOR_SUPPLY("8901_s4", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_LVS0[] = {
-	REGULATOR_SUPPLY("8901_lvs0",		NULL),
+	REGULATOR_SUPPLY("8901_lvs0", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_LVS1[] = {
-	REGULATOR_SUPPLY("8901_lvs1",		NULL),
+	REGULATOR_SUPPLY("8901_lvs1", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_LVS2[] = {
-	REGULATOR_SUPPLY("8901_lvs2",		NULL),
+	REGULATOR_SUPPLY("8901_lvs2", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_LVS3[] = {
-	REGULATOR_SUPPLY("8901_lvs3",		NULL),
+	REGULATOR_SUPPLY("8901_lvs3", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_MVS0[] = {
-	REGULATOR_SUPPLY("8901_mvs0",		NULL),
+	REGULATOR_SUPPLY("8901_mvs0", NULL),
 };
 
 /* Pin control regulators */
 static struct regulator_consumer_supply vreg_consumers_PM8058_L8_PC[] = {
-	REGULATOR_SUPPLY("8058_l8_pc",		NULL),
+	REGULATOR_SUPPLY("8058_l8_pc", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L20_PC[] = {
-	REGULATOR_SUPPLY("8058_l20_pc",		NULL),
+	REGULATOR_SUPPLY("8058_l20_pc", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_L21_PC[] = {
-	REGULATOR_SUPPLY("8058_l21_pc",		NULL),
+	REGULATOR_SUPPLY("8058_l21_pc", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8058_S2_PC[] = {
-	REGULATOR_SUPPLY("8058_s2_pc",		NULL),
+	REGULATOR_SUPPLY("8058_s2_pc", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_L0_PC[] = {
-	REGULATOR_SUPPLY("8901_l0_pc",		NULL),
+	REGULATOR_SUPPLY("8901_l0_pc", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_PM8901_S4_PC[] = {
-	REGULATOR_SUPPLY("8901_s4_pc",		NULL),
+	REGULATOR_SUPPLY("8901_s4_pc", NULL),
 };
 
 #define RPM_VREG_INIT(_id, _min_uV, _max_uV, _modes, _ops, _apply_uV, \
@@ -4078,26 +4702,26 @@ static struct regulator_consumer_supply vreg_consumers_PM8901_S4_PC[] = {
 
 /* RPM early regulator constraints */
 static struct rpm_regulator_init_data rpm_regulator_early_init_data[] = {
-	/*	 ID       a_on pd ss min_uV   max_uV   init_ip    freq */
-	RPM_SMPS(PM8058_S0, 0, 1, 1,  500000, 1325000, SMPS_HMIN, 1p60),
-	RPM_SMPS(PM8058_S1, 0, 1, 1,  500000, 1250000, SMPS_HMIN, 1p60),
+	/*       ID       a_on pd ss min_uV   max_uV   init_ip    freq */
+	RPM_SMPS(PM8058_S0, 0, 1, 1, 500000, 1325000, SMPS_HMIN, 1p60),
+	RPM_SMPS(PM8058_S1, 0, 1, 1, 500000, 1250000, SMPS_HMIN, 1p60),
 };
 
 /* RPM regulator constraints */
 static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
-	/*	ID        a_on pd ss min_uV   max_uV   init_ip */
-	RPM_LDO(PM8058_L0,  0, 1, 0, 1200000, 1200000, LDO150HMIN),
-	RPM_LDO(PM8058_L1,  0, 1, 0, 1200000, 1200000, LDO300HMIN),
-	RPM_LDO(PM8058_L2,  0, 1, 0, 1800000, 2600000, LDO300HMIN),
-	RPM_LDO(PM8058_L3,  0, 1, 0, 1800000, 1800000, LDO150HMIN),
-	RPM_LDO(PM8058_L4,  0, 1, 0, 2850000, 2850000,  LDO50HMIN),
-	RPM_LDO(PM8058_L5,  0, 1, 0, 2850000, 2850000, LDO300HMIN),
-	RPM_LDO(PM8058_L6,  0, 1, 0, 3000000, 3600000,  LDO50HMIN),
-	RPM_LDO(PM8058_L7,  0, 1, 0, 1800000, 1800000,  LDO50HMIN),
-	RPM_LDO(PM8058_L8,  0, 1, 0, 2900000, 3050000, LDO300HMIN),
-	RPM_LDO(PM8058_L9,  0, 1, 0, 1800000, 1800000, LDO300HMIN),
+	/*      ID        a_on pd ss min_uV   max_uV   init_ip */
+	RPM_LDO(PM8058_L0, 0, 1, 0, 1200000, 1200000, LDO150HMIN),
+	RPM_LDO(PM8058_L1, 0, 1, 0, 1200000, 1200000, LDO300HMIN),
+	RPM_LDO(PM8058_L2, 0, 1, 0, 1800000, 2600000, LDO300HMIN),
+	RPM_LDO(PM8058_L3, 0, 1, 0, 1800000, 1800000, LDO150HMIN),
+	RPM_LDO(PM8058_L4, 0, 1, 0, 2850000, 2850000, LDO50HMIN),
+	RPM_LDO(PM8058_L5, 0, 1, 0, 2850000, 2850000, LDO300HMIN),
+	RPM_LDO(PM8058_L6, 0, 1, 0, 3000000, 3600000, LDO50HMIN),
+	RPM_LDO(PM8058_L7, 0, 1, 0, 1800000, 1800000, LDO50HMIN),
+	RPM_LDO(PM8058_L8, 0, 1, 0, 1800000, 3050000, LDO300HMIN),
+	RPM_LDO(PM8058_L9, 0, 1, 0, 1800000, 1800000, LDO300HMIN),
 	RPM_LDO(PM8058_L10, 0, 1, 0, 2600000, 2600000, LDO300HMIN),
-	RPM_LDO(PM8058_L11, 0, 1, 0, 1500000, 1500000, LDO150HMIN),
+	RPM_LDO(PM8058_L11, 0, 1, 0, 2800000, 2800000, LDO150HMIN),
 	RPM_LDO(PM8058_L12, 0, 1, 0, 2900000, 2900000, LDO150HMIN),
 	RPM_LDO(PM8058_L13, 0, 1, 0, 2050000, 2050000, LDO300HMIN),
 	RPM_LDO(PM8058_L14, 0, 0, 0, 2850000, 2850000, LDO300HMIN),
@@ -4107,13 +4731,13 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 	RPM_LDO(PM8058_L18, 0, 1, 0, 2200000, 2200000, LDO150HMIN),
 	RPM_LDO(PM8058_L19, 0, 1, 0, 2500000, 2500000, LDO150HMIN),
 	RPM_LDO(PM8058_L20, 0, 1, 0, 1800000, 1800000, LDO150HMIN),
-	RPM_LDO(PM8058_L21, 1, 1, 0, 1200000, 1200000, LDO150HMIN),
+	RPM_LDO(PM8058_L21, 0, 1, 0, 1200000, 1200000, LDO150HMIN),
 	RPM_LDO(PM8058_L22, 0, 1, 0, 1150000, 1150000, LDO300HMIN),
 	RPM_LDO(PM8058_L23, 0, 1, 0, 1200000, 1200000, LDO300HMIN),
 	RPM_LDO(PM8058_L24, 0, 1, 0, 1200000, 1200000, LDO150HMIN),
 	RPM_LDO(PM8058_L25, 0, 1, 0, 1200000, 1200000, LDO150HMIN),
 
-	/*	 ID       a_on pd ss min_uV   max_uV   init_ip    freq */
+	/*       ID       a_on pd ss min_uV   max_uV   init_ip    freq */
 	RPM_SMPS(PM8058_S2, 0, 1, 1, 1200000, 1400000, SMPS_HMIN, 1p60),
 	RPM_SMPS(PM8058_S3, 1, 1, 0, 1800000, 1800000, SMPS_HMIN, 1p60),
 	RPM_SMPS(PM8058_S4, 1, 1, 0, 2200000, 2200000, SMPS_HMIN, 1p60),
@@ -4122,67 +4746,67 @@ static struct rpm_regulator_init_data rpm_regulator_init_data[] = {
 	RPM_VS(PM8058_LVS0, 0, 1, 0),
 	RPM_VS(PM8058_LVS1, 0, 1, 0),
 
-	/*	ID        a_on pd ss min_uV   max_uV */
+	/*      ID        a_on pd ss min_uV   max_uV */
 	RPM_NCP(PM8058_NCP, 0, 1, 0, 1800000, 1800000),
 
-	/*	ID        a_on pd ss min_uV   max_uV   init_ip */
-	RPM_LDO(PM8901_L0,  0, 1, 0, 1200000, 1200000, LDO300HMIN),
-	RPM_LDO(PM8901_L1,  0, 1, 0, 3300000, 3300000, LDO300HMIN),
-	RPM_LDO(PM8901_L2,  0, 1, 0, 2850000, 3300000, LDO300HMIN),
-	RPM_LDO(PM8901_L3,  0, 1, 0, 3300000, 3300000, LDO300HMIN),
-	RPM_LDO(PM8901_L4,  0, 1, 0, 2600000, 2600000, LDO300HMIN),
-	RPM_LDO(PM8901_L5,  0, 1, 0, 2850000, 2850000, LDO300HMIN),
-	RPM_LDO(PM8901_L6,  0, 1, 0, 2200000, 2200000, LDO300HMIN),
+	/*      ID        a_on pd ss min_uV   max_uV   init_ip */
+	RPM_LDO(PM8901_L0, 0, 1, 0, 1200000, 1200000, LDO300HMIN),
+	RPM_LDO(PM8901_L1, 0, 1, 0, 3300000, 3300000, LDO300HMIN),
+	RPM_LDO(PM8901_L2, 0, 1, 0, 2850000, 3300000, LDO300HMIN),
+	RPM_LDO(PM8901_L3, 0, 1, 0, 3300000, 3300000, LDO300HMIN),
+	RPM_LDO(PM8901_L4, 1, 1, 0, 2900000, 2900000, LDO300HMIN),
+	RPM_LDO(PM8901_L5, 0, 1, 0, 2850000, 2850000, LDO300HMIN),
+	RPM_LDO(PM8901_L6, 0, 1, 0, 2200000, 2200000, LDO300HMIN),
 
-	/*	 ID       a_on pd ss min_uV   max_uV   init_ip   freq */
+	/*       ID       a_on pd ss min_uV   max_uV   init_ip   freq */
 	RPM_SMPS(PM8901_S2, 0, 1, 0, 1300000, 1300000, FTS_HMIN, 1p60),
 	RPM_SMPS(PM8901_S3, 0, 1, 0, 1100000, 1100000, FTS_HMIN, 1p60),
 	RPM_SMPS(PM8901_S4, 0, 1, 0, 1225000, 1225000, FTS_HMIN, 1p60),
 
-	/*	ID        a_on pd ss */
+	/*      ID        a_on pd ss */
 	RPM_VS(PM8901_LVS0, 1, 1, 0),
 	RPM_VS(PM8901_LVS1, 0, 1, 0),
 	RPM_VS(PM8901_LVS2, 0, 1, 0),
 	RPM_VS(PM8901_LVS3, 0, 1, 0),
-	RPM_VS(PM8901_MVS0, 0, 1, 0),
+	RPM_VS(PM8901_MVS0, 1, 1, 0),
 
 	/*     ID         a_on pin_func pin_ctrl */
-	RPM_PC(PM8058_L8,   0, SLEEP_B, RPM_VREG_PIN_CTRL_NONE),
-	RPM_PC(PM8058_L20,  0, SLEEP_B, RPM_VREG_PIN_CTRL_NONE),
-	RPM_PC(PM8058_L21,  1, SLEEP_B, RPM_VREG_PIN_CTRL_NONE),
-	RPM_PC(PM8058_S2,   0, ENABLE,  RPM_VREG_PIN_CTRL_PM8058_A0),
-	RPM_PC(PM8901_L0,   0, ENABLE,  RPM_VREG_PIN_CTRL_PM8901_A0),
-	RPM_PC(PM8901_S4,   0, ENABLE,  RPM_VREG_PIN_CTRL_PM8901_A0),
+	RPM_PC(PM8058_L8, 0, SLEEP_B, RPM_VREG_PIN_CTRL_NONE),
+	RPM_PC(PM8058_L20, 0, SLEEP_B, RPM_VREG_PIN_CTRL_NONE),
+	RPM_PC(PM8058_L21, 1, SLEEP_B, RPM_VREG_PIN_CTRL_NONE),
+	RPM_PC(PM8058_S2, 0, ENABLE, RPM_VREG_PIN_CTRL_PM8058_A0),
+	RPM_PC(PM8901_L0, 0, ENABLE, RPM_VREG_PIN_CTRL_PM8901_A0),
+	RPM_PC(PM8901_S4, 0, ENABLE, RPM_VREG_PIN_CTRL_PM8901_A0),
 };
 
 static struct rpm_regulator_platform_data rpm_regulator_early_pdata = {
-	.init_data		= rpm_regulator_early_init_data,
-	.num_regulators		= ARRAY_SIZE(rpm_regulator_early_init_data),
-	.version		= RPM_VREG_VERSION_8660,
-	.vreg_id_vdd_mem	= RPM_VREG_ID_PM8058_S0,
-	.vreg_id_vdd_dig	= RPM_VREG_ID_PM8058_S1,
+	.init_data = rpm_regulator_early_init_data,
+	.num_regulators = ARRAY_SIZE(rpm_regulator_early_init_data),
+	.version = RPM_VREG_VERSION_8660,
+	.vreg_id_vdd_mem = RPM_VREG_ID_PM8058_S0,
+	.vreg_id_vdd_dig = RPM_VREG_ID_PM8058_S1,
 };
 
 static struct rpm_regulator_platform_data rpm_regulator_pdata = {
-	.init_data		= rpm_regulator_init_data,
-	.num_regulators		= ARRAY_SIZE(rpm_regulator_init_data),
-	.version		= RPM_VREG_VERSION_8660,
+	.init_data = rpm_regulator_init_data,
+	.num_regulators = ARRAY_SIZE(rpm_regulator_init_data),
+	.version = RPM_VREG_VERSION_8660,
 };
 
 static struct platform_device rpm_regulator_early_device = {
-	.name	= "rpm-regulator",
-	.id	= 0,
-	.dev	= {
+	.name = "rpm-regulator",
+	.id = 0,
+	.dev = {
 		.platform_data = &rpm_regulator_early_pdata,
-	},
+		},
 };
 
 static struct platform_device rpm_regulator_device = {
-	.name	= "rpm-regulator",
-	.id	= 1,
-	.dev	= {
+	.name = "rpm-regulator",
+	.id = 1,
+	.dev = {
 		.platform_data = &rpm_regulator_pdata,
-	},
+		},
 };
 
 static struct platform_device *early_regulators[] __initdata = {
@@ -4208,16 +4832,16 @@ static struct platform_device *early_devices[] __initdata = {
 
 static int bluetooth_power(int);
 static struct platform_device msm_bt_power_device = {
-	.name	 = "bt_power",
-	.id	 = -1,
-	.dev	 = {
+	.name = "bt_power",
+	.id = -1,
+	.dev = {
 		.platform_data = &bluetooth_power,
-	},
+		},
 };
 #endif
 
 static struct platform_device msm_tsens_device = {
-	.name   = "tsens-tm",
+	.name = "tsens-tm",
 	.id = -1,
 };
 
@@ -4241,8 +4865,8 @@ static struct platform_device *rumi_sim_devices[] __initdata = {
 	&android_pmem_adsp_device,
 	&android_pmem_smipool_device,
 	&android_pmem_audio_device,
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-#endif /*CONFIG_ANDROID_PMEM*/
+#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION */
+#endif /*CONFIG_ANDROID_PMEM */
 #ifdef CONFIG_MSM_ROTATOR
 	&msm_rotator_device,
 #endif
@@ -4301,93 +4925,92 @@ enum {
 
 static struct sx150x_platform_data sx150x_data[] __initdata = {
 	[SX150X_CORE] = {
-		.gpio_base         = GPIO_CORE_EXPANDER_BASE,
-		.oscio_is_gpo      = false,
-		.io_pullup_ena     = 0x0c08,
-		.io_pulldn_ena     = 0x4060,
-		.io_open_drain_ena = 0x000c,
-		.io_polarity       = 0,
-		.irq_summary       = -1, /* see fixup_i2c_configs() */
-		.irq_base          = GPIO_EXPANDER_IRQ_BASE,
-	},
+			 .gpio_base = GPIO_CORE_EXPANDER_BASE,
+			 .oscio_is_gpo = false,
+			 .io_pullup_ena = 0x0c08,
+			 .io_pulldn_ena = 0x4060,
+			 .io_open_drain_ena = 0x000c,
+			 .io_polarity = 0,
+			 .irq_summary = -1,	/* see fixup_i2c_configs() */
+			 .irq_base = GPIO_EXPANDER_IRQ_BASE,
+			 },
 	[SX150X_DOCKING] = {
-		.gpio_base         = GPIO_DOCKING_EXPANDER_BASE,
-		.oscio_is_gpo      = false,
-		.io_pullup_ena     = 0x5e06,
-		.io_pulldn_ena     = 0x81b8,
-		.io_open_drain_ena = 0,
-		.io_polarity       = 0,
-		.irq_summary       = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
-						     UI_INT2_N),
-		.irq_base          = GPIO_EXPANDER_IRQ_BASE +
-				     GPIO_DOCKING_EXPANDER_BASE -
-				     GPIO_EXPANDER_GPIO_BASE,
-	},
+			    .gpio_base = GPIO_DOCKING_EXPANDER_BASE,
+			    .oscio_is_gpo = false,
+			    .io_pullup_ena = 0x5e06,
+			    .io_pulldn_ena = 0x81b8,
+			    .io_open_drain_ena = 0,
+			    .io_polarity = 0,
+			    .irq_summary = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
+							   UI_INT2_N),
+			    .irq_base = GPIO_EXPANDER_IRQ_BASE +
+			    GPIO_DOCKING_EXPANDER_BASE -
+			    GPIO_EXPANDER_GPIO_BASE,
+			    },
 	[SX150X_SURF] = {
-		.gpio_base         = GPIO_SURF_EXPANDER_BASE,
-		.oscio_is_gpo      = false,
-		.io_pullup_ena     = 0,
-		.io_pulldn_ena     = 0,
-		.io_open_drain_ena = 0,
-		.io_polarity       = 0,
-		.irq_summary       = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
-						     UI_INT1_N),
-		.irq_base          = GPIO_EXPANDER_IRQ_BASE +
-				     GPIO_SURF_EXPANDER_BASE -
-				     GPIO_EXPANDER_GPIO_BASE,
-	},
+			 .gpio_base = GPIO_SURF_EXPANDER_BASE,
+			 .oscio_is_gpo = false,
+			 .io_pullup_ena = 0,
+			 .io_pulldn_ena = 0,
+			 .io_open_drain_ena = 0,
+			 .io_polarity = 0,
+			 .irq_summary = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
+							UI_INT1_N),
+			 .irq_base = GPIO_EXPANDER_IRQ_BASE +
+			 GPIO_SURF_EXPANDER_BASE - GPIO_EXPANDER_GPIO_BASE,
+			 },
 	[SX150X_LEFT_FHA] = {
-		.gpio_base         = GPIO_LEFT_KB_EXPANDER_BASE,
-		.oscio_is_gpo      = false,
-		.io_pullup_ena     = 0,
-		.io_pulldn_ena     = 0x40,
-		.io_open_drain_ena = 0,
-		.io_polarity       = 0,
-		.irq_summary       = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
-						     UI_INT3_N),
-		.irq_base          = GPIO_EXPANDER_IRQ_BASE +
-				     GPIO_LEFT_KB_EXPANDER_BASE -
-				     GPIO_EXPANDER_GPIO_BASE,
-	},
+			     .gpio_base = GPIO_LEFT_KB_EXPANDER_BASE,
+			     .oscio_is_gpo = false,
+			     .io_pullup_ena = 0,
+			     .io_pulldn_ena = 0x40,
+			     .io_open_drain_ena = 0,
+			     .io_polarity = 0,
+			     .irq_summary = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
+							    UI_INT3_N),
+			     .irq_base = GPIO_EXPANDER_IRQ_BASE +
+			     GPIO_LEFT_KB_EXPANDER_BASE -
+			     GPIO_EXPANDER_GPIO_BASE,
+			     },
 	[SX150X_RIGHT_FHA] = {
-		.gpio_base         = GPIO_RIGHT_KB_EXPANDER_BASE,
-		.oscio_is_gpo      = true,
-		.io_pullup_ena     = 0,
-		.io_pulldn_ena     = 0,
-		.io_open_drain_ena = 0,
-		.io_polarity       = 0,
-		.irq_summary       = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
-						     UI_INT3_N),
-		.irq_base          = GPIO_EXPANDER_IRQ_BASE +
-				     GPIO_RIGHT_KB_EXPANDER_BASE -
-				     GPIO_EXPANDER_GPIO_BASE,
-	},
+			      .gpio_base = GPIO_RIGHT_KB_EXPANDER_BASE,
+			      .oscio_is_gpo = true,
+			      .io_pullup_ena = 0,
+			      .io_pulldn_ena = 0,
+			      .io_open_drain_ena = 0,
+			      .io_polarity = 0,
+			      .irq_summary = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
+							     UI_INT3_N),
+			      .irq_base = GPIO_EXPANDER_IRQ_BASE +
+			      GPIO_RIGHT_KB_EXPANDER_BASE -
+			      GPIO_EXPANDER_GPIO_BASE,
+			      },
 	[SX150X_SOUTH] = {
-		.gpio_base    = GPIO_SOUTH_EXPANDER_BASE,
-		.irq_base     = GPIO_EXPANDER_IRQ_BASE +
-				GPIO_SOUTH_EXPANDER_BASE -
-				GPIO_EXPANDER_GPIO_BASE,
-		.irq_summary  = PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT3_N),
-	},
+			  .gpio_base = GPIO_SOUTH_EXPANDER_BASE,
+			  .irq_base = GPIO_EXPANDER_IRQ_BASE +
+			  GPIO_SOUTH_EXPANDER_BASE - GPIO_EXPANDER_GPIO_BASE,
+			  .irq_summary =
+			  PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT3_N),
+			  },
 	[SX150X_NORTH] = {
-		.gpio_base    = GPIO_NORTH_EXPANDER_BASE,
-		.irq_base     = GPIO_EXPANDER_IRQ_BASE +
-				GPIO_NORTH_EXPANDER_BASE -
-				GPIO_EXPANDER_GPIO_BASE,
-		.irq_summary  = PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT3_N),
-		.oscio_is_gpo = true,
-		.io_open_drain_ena = 0x30,
-	},
+			  .gpio_base = GPIO_NORTH_EXPANDER_BASE,
+			  .irq_base = GPIO_EXPANDER_IRQ_BASE +
+			  GPIO_NORTH_EXPANDER_BASE - GPIO_EXPANDER_GPIO_BASE,
+			  .irq_summary =
+			  PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT3_N),
+			  .oscio_is_gpo = true,
+			  .io_open_drain_ena = 0x30,
+			  },
 	[SX150X_CORE_FLUID] = {
-		.gpio_base         = GPIO_CORE_EXPANDER_BASE,
-		.oscio_is_gpo      = false,
-		.io_pullup_ena     = 0x0408,
-		.io_pulldn_ena     = 0x4060,
-		.io_open_drain_ena = 0x0008,
-		.io_polarity       = 0,
-		.irq_summary       = -1, /* see fixup_i2c_configs() */
-		.irq_base          = GPIO_EXPANDER_IRQ_BASE,
-	},
+			       .gpio_base = GPIO_CORE_EXPANDER_BASE,
+			       .oscio_is_gpo = false,
+			       .io_pullup_ena = 0x0408,
+			       .io_pulldn_ena = 0x4060,
+			       .io_open_drain_ena = 0x0008,
+			       .io_polarity = 0,
+			       .irq_summary = -1,	/* see fixup_i2c_configs() */
+			       .irq_base = GPIO_EXPANDER_IRQ_BASE,
+			       },
 };
 
 #ifdef CONFIG_SENSORS_MSM_ADC
@@ -4395,11 +5018,10 @@ static struct sx150x_platform_data sx150x_data[] __initdata = {
  * request an adc read
  */
 static struct sx150x_platform_data sx150x_epmdata = {
-	.gpio_base         = GPIO_EPM_EXPANDER_BASE,
-	.irq_base	   = GPIO_EXPANDER_IRQ_BASE +
-				GPIO_EPM_EXPANDER_BASE -
-				GPIO_EXPANDER_GPIO_BASE,
-	.irq_summary       = -1,
+	.gpio_base = GPIO_EPM_EXPANDER_BASE,
+	.irq_base = GPIO_EXPANDER_IRQ_BASE +
+	    GPIO_EPM_EXPANDER_BASE - GPIO_EXPANDER_GPIO_BASE,
+	.irq_summary = -1,
 };
 #endif
 
@@ -4421,21 +5043,19 @@ struct sx150x_low_power_cfg {
 	unsigned val;
 };
 
-static struct sx150x_low_power_cfg
-common_sx150x_lp_cfgs[] __initdata = {
+static struct sx150x_low_power_cfg common_sx150x_lp_cfgs[] __initdata = {
 	{GPIO_WLAN_DEEP_SLEEP_N, 0},
-	{GPIO_EXT_GPS_LNA_EN,    0},
-	{GPIO_MSM_WAKES_BT,      0},
-	{GPIO_USB_UICC_EN,       0},
-	{GPIO_BATT_GAUGE_EN,     0},
+	{GPIO_EXT_GPS_LNA_EN, 0},
+	{GPIO_MSM_WAKES_BT, 0},
+	{GPIO_USB_UICC_EN, 0},
+	{GPIO_BATT_GAUGE_EN, 0},
 };
 
-static struct sx150x_low_power_cfg
-surf_ffa_sx150x_lp_cfgs[] __initdata = {
-	{GPIO_MIPI_DSI_RST_N,      0},
-	{GPIO_DONGLE_PWR_EN,       0},
-	{GPIO_CAP_TS_SLEEP,        1},
-	{GPIO_WEB_CAMIF_RESET_N,   0},
+static struct sx150x_low_power_cfg surf_ffa_sx150x_lp_cfgs[] __initdata = {
+	{GPIO_MIPI_DSI_RST_N, 0},
+	{GPIO_DONGLE_PWR_EN, 0},
+	{GPIO_CAP_TS_SLEEP, 1},
+	{GPIO_WEB_CAMIF_RESET_N, 0},
 };
 
 static void __init
@@ -4461,71 +5081,71 @@ cfg_gpio_low_power(struct sx150x_low_power_cfg *cfgs, unsigned nelems)
 static int __init cfg_sx150xs_low_power(void)
 {
 	cfg_gpio_low_power(common_sx150x_lp_cfgs,
-		ARRAY_SIZE(common_sx150x_lp_cfgs));
+			   ARRAY_SIZE(common_sx150x_lp_cfgs));
 	if (!machine_is_msm8x60_fluid())
 		cfg_gpio_low_power(surf_ffa_sx150x_lp_cfgs,
-			ARRAY_SIZE(surf_ffa_sx150x_lp_cfgs));
+				   ARRAY_SIZE(surf_ffa_sx150x_lp_cfgs));
 	return 0;
 }
+
 module_init(cfg_sx150xs_low_power);
 
 #ifdef CONFIG_I2C
 static struct i2c_board_info core_expander_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("sx1509q", 0x3e),
-		.platform_data = &sx150x_data[SX150X_CORE]
-	},
+	 I2C_BOARD_INFO("sx1509q", 0x3e),
+	 .platform_data = &sx150x_data[SX150X_CORE]
+	 },
 };
 
 static struct i2c_board_info docking_expander_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("sx1509q", 0x3f),
-		.platform_data = &sx150x_data[SX150X_DOCKING]
-	},
+	 I2C_BOARD_INFO("sx1509q", 0x3f),
+	 .platform_data = &sx150x_data[SX150X_DOCKING]
+	 },
 };
 
 static struct i2c_board_info surf_expanders_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("sx1509q", 0x70),
-		.platform_data = &sx150x_data[SX150X_SURF]
-	}
+	 I2C_BOARD_INFO("sx1509q", 0x70),
+	 .platform_data = &sx150x_data[SX150X_SURF]
+	 }
 };
 
 static struct i2c_board_info fha_expanders_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("sx1508q", 0x21),
-		.platform_data = &sx150x_data[SX150X_LEFT_FHA]
-	},
+	 I2C_BOARD_INFO("sx1508q", 0x21),
+	 .platform_data = &sx150x_data[SX150X_LEFT_FHA]
+	 },
 	{
-		I2C_BOARD_INFO("sx1508q", 0x22),
-		.platform_data = &sx150x_data[SX150X_RIGHT_FHA]
-	}
+	 I2C_BOARD_INFO("sx1508q", 0x22),
+	 .platform_data = &sx150x_data[SX150X_RIGHT_FHA]
+	 }
 };
 
 static struct i2c_board_info fluid_expanders_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("sx1508q", 0x23),
-		.platform_data = &sx150x_data[SX150X_SOUTH]
-	},
+	 I2C_BOARD_INFO("sx1508q", 0x23),
+	 .platform_data = &sx150x_data[SX150X_SOUTH]
+	 },
 	{
-		I2C_BOARD_INFO("sx1508q", 0x20),
-		.platform_data = &sx150x_data[SX150X_NORTH]
-	}
+	 I2C_BOARD_INFO("sx1508q", 0x20),
+	 .platform_data = &sx150x_data[SX150X_NORTH]
+	 }
 };
 
 static struct i2c_board_info fluid_core_expander_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("sx1509q", 0x3e),
-		.platform_data = &sx150x_data[SX150X_CORE_FLUID]
-	},
+	 I2C_BOARD_INFO("sx1509q", 0x3e),
+	 .platform_data = &sx150x_data[SX150X_CORE_FLUID]
+	 },
 };
 
 #ifdef CONFIG_SENSORS_MSM_ADC
 static struct i2c_board_info fluid_expanders_i2c_epm_info[] = {
 	{
-		I2C_BOARD_INFO("sx1509q", 0x3e),
-		.platform_data = &sx150x_epmdata
-	},
+	 I2C_BOARD_INFO("sx1509q", 0x3e),
+	 .platform_data = &sx150x_epmdata},
 };
 #endif
 #endif
@@ -4547,7 +5167,6 @@ static struct adc_access_fn xoadc_fn = {
 static struct regulator *vreg_adc_epm1;
 
 static struct i2c_client *epm_expander_i2c_register_board(void)
-
 {
 	struct i2c_adapter *i2c_adap;
 	struct i2c_client *client = NULL;
@@ -4558,7 +5177,7 @@ static struct i2c_client *epm_expander_i2c_register_board(void)
 
 	if (i2c_adap != NULL)
 		client = i2c_new_device(i2c_adap,
-			&fluid_expanders_i2c_epm_info[0]);
+					&fluid_expanders_i2c_epm_info[0]);
 	return client;
 
 }
@@ -4580,28 +5199,28 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 	rc = regulator_set_voltage(vreg_adc_epm1, 1800000, 1800000);
 	if (rc)
 		printk(KERN_ERR "msm_adc_gpio_configure_expander_enable: "
-				"regulator set voltage failed\n");
+		       "regulator set voltage failed\n");
 
 	rc = regulator_enable(vreg_adc_epm1);
 	if (rc) {
 		printk(KERN_ERR "msm_adc_gpio_configure_expander_enable: "
-			"Error while enabling regulator for epm s3 %d\n", rc);
+		       "Error while enabling regulator for epm s3 %d\n", rc);
 		return rc;
 	}
 
 	printk(KERN_DEBUG "msm_adc_gpio_configure_expander_enable: Start"
-			" setting the value of the EPM 3.3, 5v and lvlsft\n");
+	       " setting the value of the EPM 3.3, 5v and lvlsft\n");
 
 	msleep(1000);
 
 	rc = gpio_request(GPIO_EPM_5V_BOOST_EN, "boost_epm_5v");
 	if (!rc) {
 		printk(KERN_DEBUG "msm_adc_gpio_configure_expander_enable: "
-				"Configure 5v boost\n");
+		       "Configure 5v boost\n");
 		gpio_direction_output(GPIO_EPM_5V_BOOST_EN, 1);
 	} else {
 		printk(KERN_ERR "msm_adc_gpio_configure_expander_enable: "
-				"Error for epm 5v boost en\n");
+		       "Error for epm 5v boost en\n");
 		goto exit_vreg_epm;
 	}
 
@@ -4611,24 +5230,24 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 	if (!rc) {
 		gpio_direction_output(GPIO_EPM_3_3V_EN, 1);
 		printk(KERN_DEBUG "msm_adc_gpio_configure_expander_enable: "
-				"Configure epm 3.3v\n");
+		       "Configure epm 3.3v\n");
 	} else {
 		printk(KERN_ERR "msm_adc_gpio_configure_expander_enable: "
-				"Error for gpio 3.3ven\n");
+		       "Error for gpio 3.3ven\n");
 		goto exit_vreg_epm;
 	}
 	msleep(500);
 
 	printk(KERN_DEBUG "msm_adc_gpio_configure_expander_enable: "
-			"Trying to request EPM LVLSFT_EN\n");
+	       "Trying to request EPM LVLSFT_EN\n");
 	rc = gpio_request(GPIO_EPM_LVLSFT_EN, "lvsft_en");
 	if (!rc) {
 		gpio_direction_output(GPIO_EPM_LVLSFT_EN, 1);
 		printk(KERN_DEBUG "msm_adc_gpio_configure_expander_enable: "
-				"Configure the lvlsft\n");
+		       "Configure the lvlsft\n");
 	} else {
 		printk(KERN_ERR "msm_adc_gpio_configure_expander_enable: "
-				"Error for epm lvlsft_en\n");
+		       "Error for epm lvlsft_en\n");
 		goto exit_vreg_epm;
 	}
 
@@ -4640,11 +5259,11 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 	rc = gpio_request(GPIO_PWR_MON_ENABLE, "pwr_mon_enable");
 	if (!rc)
 		rc = gpio_direction_output(GPIO_PWR_MON_ENABLE, 1);
-		if (rc) {
-			printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
-					": GPIO PWR MON Enable issue\n");
-			goto exit_vreg_epm;
-		}
+	if (rc) {
+		printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
+		       ": GPIO PWR MON Enable issue\n");
+		goto exit_vreg_epm;
+	}
 
 	msleep(1000);
 
@@ -4653,7 +5272,7 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 		rc = gpio_direction_output(GPIO_ADC1_PWDN_N, 1);
 		if (rc) {
 			printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
-					": ADC1_PWDN error direction out\n");
+			       ": ADC1_PWDN error direction out\n");
 			goto exit_vreg_epm;
 		}
 	}
@@ -4665,7 +5284,7 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 		rc = gpio_direction_output(GPIO_ADC2_PWDN_N, 1);
 		if (rc) {
 			printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
-					": ADC2_PWD error direction out\n");
+			       ": ADC2_PWD error direction out\n");
 			goto exit_vreg_epm;
 		}
 	}
@@ -4677,7 +5296,7 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 		rc = gpio_direction_output(GPIO_PWR_MON_START, 0);
 		if (rc) {
 			printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
-				"Gpio request problem %d\n", rc);
+			       "Gpio request problem %d\n", rc);
 			goto exit_vreg_epm;
 		}
 	}
@@ -4687,7 +5306,7 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 		rc = gpio_direction_output(GPIO_EPM_SPI_ADC1_CS_N, 0);
 		if (rc) {
 			printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
-					": EPM_SPI_ADC1_CS_N error\n");
+			       ": EPM_SPI_ADC1_CS_N error\n");
 			goto exit_vreg_epm;
 		}
 	}
@@ -4697,20 +5316,20 @@ static unsigned int msm_adc_gpio_configure_expander_enable(void)
 		rc = gpio_direction_output(GPIO_EPM_SPI_ADC2_CS_N, 0);
 		if (rc) {
 			printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
-					": EPM_SPI_ADC2_Cs_N error\n");
+			       ": EPM_SPI_ADC2_Cs_N error\n");
 			goto exit_vreg_epm;
 		}
 	}
 
 	printk(KERN_DEBUG "msm_adc_gpio_configure_expander_enable: Set "
-			"the power monitor reset for epm\n");
+	       "the power monitor reset for epm\n");
 
 	rc = gpio_request(GPIO_PWR_MON_RESET_N, "pwr_mon_reset_n");
 	if (!rc) {
 		gpio_direction_output(GPIO_PWR_MON_RESET_N, 0);
-		if (rc)	{
+		if (rc) {
 			printk(KERN_ERR "msm_adc_gpio_configure_expander_enable"
-					": Error in the power mon reset\n");
+			       ": Error in the power mon reset\n");
 			goto exit_vreg_epm;
 		}
 	}
@@ -4731,7 +5350,7 @@ exit_vreg_epm:
 	regulator_disable(vreg_adc_epm1);
 
 	printk(KERN_ERR "msm_adc_gpio_configure_expander_enable: Exit."
-			" rc = %d.\n", rc);
+	       " rc = %d.\n", rc);
 	return rc;
 };
 
@@ -4772,7 +5391,7 @@ static unsigned int msm_adc_gpio_configure_expander_disable(void)
 	rc = regulator_disable(vreg_adc_epm1);
 	if (rc)
 		printk(KERN_DEBUG "msm_adc_gpio_configure_expander_disable: "
-			"Error while enabling regulator for epm s3 %d\n", rc);
+		       "Error while enabling regulator for epm s3 %d\n", rc);
 	regulator_put(vreg_adc_epm1);
 
 	printk(KERN_DEBUG "Exi msm_adc_gpio_configure_expander_disable\n");
@@ -4784,7 +5403,7 @@ unsigned int msm_adc_gpio_expander_enable(int cs_enable)
 	int rc = 0;
 
 	printk(KERN_DEBUG "msm_adc_gpio_expander_enable: cs_enable = %d",
-		cs_enable);
+	       cs_enable);
 
 	if (cs_enable < 16) {
 		gpio_set_value_cansleep(GPIO_EPM_SPI_ADC1_CS_N, 0);
@@ -4812,45 +5431,45 @@ unsigned int msm_adc_gpio_expander_disable(int cs_disable)
 
 static struct msm_adc_channels msm_adc_channels_data[] = {
 	{"vbatt", CHANNEL_ADC_VBATT, 0, &xoadc_fn, CHAN_PATH_TYPE2,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE3, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE3, scale_default},
 	{"vcoin", CHANNEL_ADC_VCOIN, 0, &xoadc_fn, CHAN_PATH_TYPE1,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
 	{"vcharger_channel", CHANNEL_ADC_VCHG, 0, &xoadc_fn, CHAN_PATH_TYPE3,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE4, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE4, scale_default},
 	{"charger_current_monitor", CHANNEL_ADC_CHG_MONITOR, 0, &xoadc_fn,
-		CHAN_PATH_TYPE4,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1, scale_default},
+	 CHAN_PATH_TYPE4,
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1, scale_default},
 	{"vph_pwr", CHANNEL_ADC_VPH_PWR, 0, &xoadc_fn, CHAN_PATH_TYPE5,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE3, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE3, scale_default},
 	{"usb_vbus", CHANNEL_ADC_USB_VBUS, 0, &xoadc_fn, CHAN_PATH_TYPE11,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE3, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE3, scale_default},
 	{"pmic_therm", CHANNEL_ADC_DIE_TEMP, 0, &xoadc_fn, CHAN_PATH_TYPE12,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1, scale_pmic_therm},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1, scale_pmic_therm},
 	{"pmic_therm_4K", CHANNEL_ADC_DIE_TEMP_4K, 0, &xoadc_fn,
-		CHAN_PATH_TYPE12,
-		ADC_CONFIG_TYPE1, ADC_CALIB_CONFIG_TYPE7, scale_pmic_therm},
+	 CHAN_PATH_TYPE12,
+	 ADC_CONFIG_TYPE1, ADC_CALIB_CONFIG_TYPE7, scale_pmic_therm},
 	{"xo_therm", CHANNEL_ADC_XOTHERM, 0, &xoadc_fn, CHAN_PATH_TYPE_NONE,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE5, tdkntcgtherm},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE5, tdkntcgtherm},
 	{"xo_therm_4K", CHANNEL_ADC_XOTHERM_4K, 0, &xoadc_fn,
-		CHAN_PATH_TYPE_NONE,
-		ADC_CONFIG_TYPE1, ADC_CALIB_CONFIG_TYPE6, tdkntcgtherm},
+	 CHAN_PATH_TYPE_NONE,
+	 ADC_CONFIG_TYPE1, ADC_CALIB_CONFIG_TYPE6, tdkntcgtherm},
 	{"hdset_detect", CHANNEL_ADC_HDSET, 0, &xoadc_fn, CHAN_PATH_TYPE6,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1, scale_default},
 	{"chg_batt_amon", CHANNEL_ADC_BATT_AMON, 0, &xoadc_fn, CHAN_PATH_TYPE10,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1,
-		scale_xtern_chgr_cur},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE1,
+	 scale_xtern_chgr_cur},
 	{"msm_therm", CHANNEL_ADC_MSM_THERM, 0, &xoadc_fn, CHAN_PATH_TYPE8,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_msm_therm},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_msm_therm},
 	{"batt_therm", CHANNEL_ADC_BATT_THERM, 0, &xoadc_fn, CHAN_PATH_TYPE7,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_batt_therm},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_batt_therm},
 	{"batt_id", CHANNEL_ADC_BATT_ID, 0, &xoadc_fn, CHAN_PATH_TYPE9,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
 	{"ref_625mv", CHANNEL_ADC_625_REF, 0, &xoadc_fn, CHAN_PATH_TYPE15,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
 	{"ref_1250mv", CHANNEL_ADC_1250_REF, 0, &xoadc_fn, CHAN_PATH_TYPE13,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
 	{"ref_325mv", CHANNEL_ADC_325_REF, 0, &xoadc_fn, CHAN_PATH_TYPE14,
-		ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
+	 ADC_CONFIG_TYPE2, ADC_CALIB_CONFIG_TYPE2, scale_default},
 };
 
 static char *msm_adc_fluid_device_names[] = {
@@ -4864,18 +5483,18 @@ static struct msm_adc_platform_data msm_adc_pdata = {
 #if defined(CONFIG_I2C) && \
 	(defined(CONFIG_GPIO_SX150X) || defined(CONFIG_GPIO_SX150X_MODULE))
 	.adc_gpio_enable = msm_adc_gpio_expander_enable,
-	.adc_gpio_disable   = msm_adc_gpio_expander_disable,
+	.adc_gpio_disable = msm_adc_gpio_expander_disable,
 	.adc_fluid_enable = msm_adc_gpio_configure_expander_enable,
-	.adc_fluid_disable  = msm_adc_gpio_configure_expander_disable,
+	.adc_fluid_disable = msm_adc_gpio_configure_expander_disable,
 #endif
 };
 
 static struct platform_device msm_adc_device = {
-	.name   = "msm_adc",
+	.name = "msm_adc",
 	.id = -1,
 	.dev = {
 		.platform_data = &msm_adc_pdata,
-	},
+		},
 };
 
 static struct msm_rtb_platform_data msm_rtb_pdata = {
@@ -4890,15 +5509,15 @@ static int __init msm_rtb_set_buffer_size(char *p)
 	msm_rtb_pdata.size = ALIGN(s, SZ_4K);
 	return 0;
 }
+
 early_param("msm_rtb_size", msm_rtb_set_buffer_size);
 
-
 static struct platform_device msm_rtb_device = {
-	.name           = "msm_rtb",
-	.id             = -1,
-	.dev            = {
+	.name = "msm_rtb",
+	.id = -1,
+	.dev = {
 		.platform_data = &msm_rtb_pdata,
-	},
+		},
 };
 
 static void pmic8058_xoadc_mpp_config(void)
@@ -4906,25 +5525,29 @@ static void pmic8058_xoadc_mpp_config(void)
 	int rc, i;
 	struct pm8xxx_mpp_init_info xoadc_mpps[] = {
 		PM8058_MPP_INIT(XOADC_MPP_3, A_INPUT, PM8XXX_MPP_AIN_AMUX_CH5,
-							AOUT_CTRL_DISABLE),
+				AOUT_CTRL_DISABLE),
+#ifndef CONFIG_MACH_MIONE
 		PM8058_MPP_INIT(XOADC_MPP_5, A_INPUT, PM8XXX_MPP_AIN_AMUX_CH9,
-							AOUT_CTRL_DISABLE),
+				AOUT_CTRL_DISABLE),
+#endif
 		PM8058_MPP_INIT(XOADC_MPP_7, A_INPUT, PM8XXX_MPP_AIN_AMUX_CH6,
-							AOUT_CTRL_DISABLE),
+				AOUT_CTRL_DISABLE),
+#ifndef CONFIG_MACH_MIONE
 		PM8058_MPP_INIT(XOADC_MPP_8, A_INPUT, PM8XXX_MPP_AIN_AMUX_CH8,
-							AOUT_CTRL_DISABLE),
+				AOUT_CTRL_DISABLE),
+#endif
 		PM8058_MPP_INIT(XOADC_MPP_10, A_INPUT, PM8XXX_MPP_AIN_AMUX_CH7,
-							AOUT_CTRL_DISABLE),
+				AOUT_CTRL_DISABLE),
 		PM8901_MPP_INIT(XOADC_MPP_4, D_OUTPUT, PM8901_MPP_DIG_LEVEL_S4,
-							DOUT_CTRL_LOW),
+				DOUT_CTRL_LOW),
 	};
 
 	for (i = 0; i < ARRAY_SIZE(xoadc_mpps); i++) {
 		rc = pm8xxx_mpp_config(xoadc_mpps[i].mpp,
-					&xoadc_mpps[i].config);
+				       &xoadc_mpps[i].config);
 		if (rc) {
 			pr_err("%s: Config MPP %d of PM8058 failed\n",
-					__func__, xoadc_mpps[i].mpp);
+			       __func__, xoadc_mpps[i].mpp);
 		}
 	}
 }
@@ -4939,12 +5562,12 @@ static int pmic8058_xoadc_vreg_config(int on)
 		rc = regulator_enable(vreg_ldo18_adc);
 		if (rc)
 			pr_err("%s: Enable of regulator ldo18_adc "
-						"failed\n", __func__);
+			       "failed\n", __func__);
 	} else {
 		rc = regulator_disable(vreg_ldo18_adc);
 		if (rc)
 			pr_err("%s: Disable of regulator ldo18_adc "
-						"failed\n", __func__);
+			       "failed\n", __func__);
 	}
 
 	return rc;
@@ -4957,7 +5580,7 @@ static int pmic8058_xoadc_vreg_setup(void)
 	vreg_ldo18_adc = regulator_get(NULL, "8058_l18");
 	if (IS_ERR(vreg_ldo18_adc)) {
 		printk(KERN_ERR "%s: vreg get failed (%ld)\n",
-			__func__, PTR_ERR(vreg_ldo18_adc));
+		       __func__, PTR_ERR(vreg_ldo18_adc));
 		rc = PTR_ERR(vreg_ldo18_adc);
 		goto fail;
 	}
@@ -4985,10 +5608,10 @@ static void pmic8058_xoadc_vreg_shutdown(void)
  * the conversion, xoadc will return actual conversion time
  * */
 static struct adc_properties pm8058_xoadc_data = {
-	.adc_reference          = 2200, /* milli-voltage for this adc */
-	.bitresolution         = 15,
-	.bipolar                = 0,
-	.conversiontime         = 54,
+	.adc_reference = 2200,	/* milli-voltage for this adc */
+	.bitresolution = 15,
+	.bipolar = 0,
+	.conversiontime = 54,
 };
 
 static struct xoadc_platform_data pm8058_xoadc_pdata = {
@@ -5020,7 +5643,6 @@ static int configure_mdm2ap_status(int on)
 	return ret;
 }
 
-
 static int get_mdm2ap_status(void)
 {
 	return gpio_get_value(mdm2ap_status);
@@ -5039,10 +5661,10 @@ static struct sdio_al_platform_data sdio_al_pdata = {
 struct platform_device msm_device_sdio_al = {
 	.name = "msm_sdio_al",
 	.id = -1,
-	.dev		= {
+	.dev = {
 		.parent = &msm_charm_modem.dev,
-		.platform_data	= &sdio_al_pdata,
-	},
+		.platform_data = &sdio_al_pdata,
+		},
 };
 
 #endif /* CONFIG_MSM_SDIO_AL */
@@ -5050,8 +5672,8 @@ struct platform_device msm_device_sdio_al = {
 #define GPIO_VREG_ID_EXT_5V		0
 
 static struct regulator_consumer_supply vreg_consumers_EXT_5V[] = {
-	REGULATOR_SUPPLY("ext_5v",	NULL),
-	REGULATOR_SUPPLY("8901_mpp0",	NULL),
+	REGULATOR_SUPPLY("ext_5v", NULL),
+	REGULATOR_SUPPLY("8901_mpp0", NULL),
 };
 
 #define GPIO_VREG_INIT(_id, _reg_name, _gpio_label, _gpio, _active_low) \
@@ -5073,17 +5695,16 @@ static struct regulator_consumer_supply vreg_consumers_EXT_5V[] = {
 /* GPIO regulator constraints */
 static struct gpio_regulator_platform_data msm_gpio_regulator_pdata[] = {
 	GPIO_VREG_INIT(EXT_5V, "ext_5v", "ext_5v_en",
-					PM8901_MPP_PM_TO_SYS(0), 0),
+		       PM8901_MPP_PM_TO_SYS(0), 0),
 };
 
 /* GPIO regulator */
 static struct platform_device msm8x60_8901_mpp_vreg __devinitdata = {
-	.name	= GPIO_REGULATOR_DEV_NAME,
-	.id	= PM8901_MPP_PM_TO_SYS(0),
-	.dev	= {
-		.platform_data =
-			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_5V],
-	},
+	.name = GPIO_REGULATOR_DEV_NAME,
+	.id = PM8901_MPP_PM_TO_SYS(0),
+	.dev = {
+		.platform_data = &msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_5V],
+		},
 };
 
 static void __init pm8901_vreg_mpp0_init(void)
@@ -5091,11 +5712,11 @@ static void __init pm8901_vreg_mpp0_init(void)
 	int rc;
 
 	struct pm8xxx_mpp_init_info pm8901_vreg_mpp0 = {
-		.mpp	= PM8901_MPP_PM_TO_SYS(0),
-		.config =  {
-			.type	= PM8XXX_MPP_TYPE_D_OUTPUT,
-			.level	= PM8901_MPP_DIG_LEVEL_VPH,
-		},
+		.mpp = PM8901_MPP_PM_TO_SYS(0),
+		.config = {
+			   .type = PM8XXX_MPP_TYPE_D_OUTPUT,
+			   .level = PM8901_MPP_DIG_LEVEL_VPH,
+			   },
 	};
 
 	/*
@@ -5149,62 +5770,62 @@ static struct platform_device *asoc_devices[] __initdata = {
 /* qseecom bus scaling */
 static struct msm_bus_vectors qseecom_clks_init_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_SPS,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ib = 0,
-		.ab = 0,
-	},
+	 .src = MSM_BUS_MASTER_SPS,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ib = 0,
+	 .ab = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_SPDM,
-		.dst = MSM_BUS_SLAVE_SPDM,
-		.ib = 0,
-		.ab = 0,
-	},
+	 .src = MSM_BUS_MASTER_SPDM,
+	 .dst = MSM_BUS_SLAVE_SPDM,
+	 .ib = 0,
+	 .ab = 0,
+	 },
 };
 
 static struct msm_bus_vectors qseecom_enable_dfab_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_SPS,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ib = (492 * 8) * 1000000UL,
-		.ab = (492 * 8) *  100000UL,
-	},
+	 .src = MSM_BUS_MASTER_SPS,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ib = (492 * 8) * 1000000UL,
+	 .ab = (492 * 8) * 100000UL,
+	 },
 	{
-		.src = MSM_BUS_MASTER_SPDM,
-		.dst = MSM_BUS_SLAVE_SPDM,
-		.ib = 0,
-		.ab = 0,
-	},
+	 .src = MSM_BUS_MASTER_SPDM,
+	 .dst = MSM_BUS_SLAVE_SPDM,
+	 .ib = 0,
+	 .ab = 0,
+	 },
 };
 
 static struct msm_bus_vectors qseecom_enable_sfpb_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_SPS,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ib = 0,
-		.ab = 0,
-	},
+	 .src = MSM_BUS_MASTER_SPS,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ib = 0,
+	 .ab = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_SPDM,
-		.dst = MSM_BUS_SLAVE_SPDM,
-		.ib = (64 * 8) * 1000000UL,
-		.ab = (64 * 8) *  100000UL,
-	},
+	 .src = MSM_BUS_MASTER_SPDM,
+	 .dst = MSM_BUS_SLAVE_SPDM,
+	 .ib = (64 * 8) * 1000000UL,
+	 .ab = (64 * 8) * 100000UL,
+	 },
 };
 
 static struct msm_bus_paths qseecom_hw_bus_scale_usecases[] = {
 	{
-		ARRAY_SIZE(qseecom_clks_init_vectors),
-		qseecom_clks_init_vectors,
-	},
+	 ARRAY_SIZE(qseecom_clks_init_vectors),
+	 qseecom_clks_init_vectors,
+	 },
 	{
-		ARRAY_SIZE(qseecom_enable_dfab_vectors),
-		qseecom_enable_sfpb_vectors,
-	},
+	 ARRAY_SIZE(qseecom_enable_dfab_vectors),
+	 qseecom_enable_sfpb_vectors,
+	 },
 	{
-		ARRAY_SIZE(qseecom_enable_sfpb_vectors),
-		qseecom_enable_sfpb_vectors,
-	},
+	 ARRAY_SIZE(qseecom_enable_sfpb_vectors),
+	 qseecom_enable_sfpb_vectors,
+	 },
 };
 
 static struct msm_bus_scale_pdata qseecom_bus_pdata = {
@@ -5214,11 +5835,104 @@ static struct msm_bus_scale_pdata qseecom_bus_pdata = {
 };
 
 static struct platform_device qseecom_device = {
-	.name		= "qseecom",
-	.id		= -1,
-	.dev		= {
+	.name = "qseecom",
+	.id = -1,
+	.dev = {
 		.platform_data = &qseecom_bus_pdata,
-	},
+		},
+};
+
+static int msm_sdcc_setup_pad(int dev_id, unsigned int enable);
+struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
+	.gpio_wake = XIAOMI_GPIO_BT_WAKE,
+	.gpio_host_wake = XIAOMI_GPIO_BT_HOST_WAKE,
+	.request_clock_off_locked = msm_hs_request_clock_off_locked,
+	.request_clock_on_locked = msm_hs_request_clock_on_locked,
+};
+
+struct platform_device bcm_bt_lpm_device = {
+	.name = "bcm_bt_lpm",
+	.id = 0,
+	.dev = {
+		.platform_data = &bcm_bt_lpm_pdata,
+		},
+};
+
+/* BCM4329 returns wrong sdio_vsn(1) when we read cccr,
+ * we use predefined value (sdio_vsn=2) here to initial sdio driver well
+ */
+static struct embedded_sdio_data bcm_wifi_emb_data = {
+	.cccr = {
+		 .sdio_vsn = 2,
+		 .multi_block = 1,
+		 .low_speed = 0,
+		 .wide_bus = 0,
+		 .high_power = 1,
+		 .high_speed = 1,
+		 },
+};
+
+static int bcm_wifi_cd;	/* WIFI virtual 'card detect' status */
+static void (*wifi_status_cb) (int card_present, void *dev_id);
+static void *wifi_status_cb_devid;
+
+static int
+bcm_wifi_status_register(void (*callback) (int card_present, void *dev_id),
+			 void *dev_id)
+{
+	if (wifi_status_cb)
+		return -EAGAIN;
+	wifi_status_cb = callback;
+	wifi_status_cb_devid = dev_id;
+	return 0;
+}
+
+static unsigned int bcm_wifi_status(struct device *dev)
+{
+	return bcm_wifi_cd;
+}
+
+int bcm_wifi_set_carddetect(int val)
+{
+	printk(" %s:%d val[%d] \n", __func__, __LINE__, val);
+	bcm_wifi_cd = val;
+	if (wifi_status_cb) {
+		wifi_status_cb(val, wifi_status_cb_devid);
+	} else
+		printk("%s: Nobody to notify\n", __func__);
+	return 0;
+}
+
+static int bcm_wifi_power_state;
+int bcm_wifi_power(int on)
+{
+	printk("%s:%d on[%d] enter\n", __func__, __LINE__, on);
+
+	msm_sdcc_setup_pad(4, on);
+
+	mdelay(100);
+
+	gpio_direction_output(XIAOMI_GPIO_WIFI_SHUTDOWN_N, on);
+
+	mdelay(200);
+
+	bcm_wifi_power_state = on;
+	printk("%s:%d on[%d] leave\n", __func__, __LINE__, on);
+	return 0;
+}
+
+static int bcm_wifi_reset_state;
+
+int bcm_wifi_reset(int on)
+{
+	printk("%s:%d do nothing\n", __func__, __LINE__);
+	bcm_wifi_reset_state = on;
+	return 0;
+}
+
+static struct platform_device xiaomi_rfkill = {
+	.name = "xiaomi_rfkill",
+	.id = -1,
 };
 
 static struct platform_device *surf_devices[] __initdata = {
@@ -5246,6 +5960,8 @@ static struct platform_device *surf_devices[] __initdata = {
 	&msm_device_ssbi_pmic1,
 	&msm_device_ssbi_pmic2,
 #endif
+	&xiaomi_rfkill,
+	&bcm_bt_lpm_device,
 #ifdef CONFIG_I2C_SSBI
 	&msm_device_ssbi3,
 #endif
@@ -5277,8 +5993,8 @@ static struct platform_device *surf_devices[] __initdata = {
 	&android_pmem_adsp_device,
 	&android_pmem_smipool_device,
 	&android_pmem_audio_device,
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-#endif /*CONFIG_ANDROID_PMEM*/
+#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION */
+#endif /*CONFIG_ANDROID_PMEM */
 #ifdef CONFIG_MSM_ROTATOR
 	&msm_rotator_device,
 #endif
@@ -5360,7 +6076,6 @@ static struct platform_device *surf_devices[] __initdata = {
 	&qcedev_device,
 #endif
 
-
 #if defined(CONFIG_TSIF) || defined(CONFIG_TSIF_MODULE)
 #ifdef CONFIG_MSM_USE_TSIF1
 	&msm_device_tsif[1],
@@ -5435,90 +6150,89 @@ static struct ion_co_heap_pdata co_ion_pdata = {
 static struct ion_platform_data ion_pdata = {
 	.nr = MSM_ION_HEAP_NUM,
 	.heaps = {
-		{
-			.id	= ION_SYSTEM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_SYSTEM,
-			.name	= ION_VMALLOC_HEAP_NAME,
-		},
+		  {
+		   .id = ION_SYSTEM_HEAP_ID,
+		   .type = ION_HEAP_TYPE_SYSTEM,
+		   .name = ION_VMALLOC_HEAP_NAME,
+		   },
 #ifdef CONFIG_MSM_MULTIMEDIA_USE_ION
-		{
-			.id	= ION_CP_MM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MM_HEAP_NAME,
-			.base   = MSM_ION_MM_BASE,
-			.size	= MSM_ION_MM_SIZE,
-			.memory_type = ION_SMI_TYPE,
-			.extra_data = (void *) &cp_mm_ion_pdata,
-		},
-		{
-			.id	= ION_MM_FIRMWARE_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_MM_FIRMWARE_HEAP_NAME,
-			.base	= MSM_MM_FW_BASE,
-			.size	= MSM_MM_FW_SIZE,
-			.memory_type = ION_SMI_TYPE,
-			.extra_data = (void *) &mm_fw_co_ion_pdata,
-		},
-		{
-			.id	= ION_CP_MFC_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_MFC_HEAP_NAME,
-			.base	= MSM_ION_MFC_BASE,
-			.size	= MSM_ION_MFC_SIZE,
-			.memory_type = ION_SMI_TYPE,
-			.extra_data = (void *) &cp_mfc_ion_pdata,
-		},
-		{
-			.id	= ION_SF_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_SF_HEAP_NAME,
-			.size	= MSM_ION_SF_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *)&co_ion_pdata,
-		},
-		{
-			.id	= ION_CAMERA_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_CAMERA_HEAP_NAME,
-			.size	= MSM_ION_CAMERA_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = &co_ion_pdata,
-		},
-		{
-			.id	= ION_CP_WB_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CP,
-			.name	= ION_WB_HEAP_NAME,
-			.size	= MSM_ION_WB_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &cp_wb_ion_pdata,
-		},
-		{
-			.id	= ION_QSECOM_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_QSECOM_HEAP_NAME,
-			.size	= MSM_ION_QSECOM_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *) &co_ion_pdata,
-		},
-		{
-			.id	= ION_AUDIO_HEAP_ID,
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= ION_AUDIO_HEAP_NAME,
-			.size	= MSM_ION_AUDIO_SIZE,
-			.memory_type = ION_EBI_TYPE,
-			.extra_data = (void *)&co_ion_pdata,
-		},
+		  {
+		   .id = ION_CP_MM_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CP,
+		   .name = ION_MM_HEAP_NAME,
+		   .base = MSM_ION_MM_BASE,
+		   .size = MSM_ION_MM_SIZE,
+		   .memory_type = ION_SMI_TYPE,
+		   .extra_data = (void *)&cp_mm_ion_pdata,
+		   },
+		  {
+		   .id = ION_MM_FIRMWARE_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CARVEOUT,
+		   .name = ION_MM_FIRMWARE_HEAP_NAME,
+		   .base = MSM_MM_FW_BASE,
+		   .size = MSM_MM_FW_SIZE,
+		   .memory_type = ION_SMI_TYPE,
+		   .extra_data = (void *)&mm_fw_co_ion_pdata,
+		   },
+		  {
+		   .id = ION_CP_MFC_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CP,
+		   .name = ION_MFC_HEAP_NAME,
+		   .base = MSM_ION_MFC_BASE,
+		   .size = MSM_ION_MFC_SIZE,
+		   .memory_type = ION_SMI_TYPE,
+		   .extra_data = (void *)&cp_mfc_ion_pdata,
+		   },
+		  {
+		   .id = ION_SF_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CARVEOUT,
+		   .name = ION_SF_HEAP_NAME,
+		   .size = MSM_ION_SF_SIZE,
+		   .memory_type = ION_EBI_TYPE,
+		   .extra_data = (void *)&co_ion_pdata,
+		   },
+		  {
+		   .id = ION_CAMERA_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CARVEOUT,
+		   .name = ION_CAMERA_HEAP_NAME,
+		   .size = MSM_ION_CAMERA_SIZE,
+		   .memory_type = ION_EBI_TYPE,
+		   .extra_data = &co_ion_pdata,
+		   },
+		  {
+		   .id = ION_CP_WB_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CP,
+		   .name = ION_WB_HEAP_NAME,
+		   .size = MSM_ION_WB_SIZE,
+		   .memory_type = ION_EBI_TYPE,
+		   .extra_data = (void *)&cp_wb_ion_pdata,
+		   },
+		  {
+		   .id = ION_QSECOM_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CARVEOUT,
+		   .name = ION_QSECOM_HEAP_NAME,
+		   .size = MSM_ION_QSECOM_SIZE,
+		   .memory_type = ION_EBI_TYPE,
+		   .extra_data = (void *)&co_ion_pdata,
+		   },
+		  {
+		   .id = ION_AUDIO_HEAP_ID,
+		   .type = ION_HEAP_TYPE_CARVEOUT,
+		   .name = ION_AUDIO_HEAP_NAME,
+		   .size = MSM_ION_AUDIO_SIZE,
+		   .memory_type = ION_EBI_TYPE,
+		   .extra_data = (void *)&co_ion_pdata,
+		   },
 #endif
-	}
+		  }
 };
 
 static struct platform_device ion_dev = {
 	.name = "ion-msm",
 	.id = 1,
-	.dev = { .platform_data = &ion_pdata },
+	.dev = {.platform_data = &ion_pdata},
 };
 #endif
-
 
 static struct memtype_reserve msm8x60_reserve_table[] __initdata = {
 	/* Kernel SMI memory pool for video core, used for firmware */
@@ -5527,19 +6241,19 @@ static struct memtype_reserve msm8x60_reserve_table[] __initdata = {
 	/* SMI memory pool, as the video core will use offset address */
 	/* from the Firmware base */
 	[MEMTYPE_SMI_KERNEL] = {
-		.start	=	KERNEL_SMI_BASE,
-		.limit	=	KERNEL_SMI_SIZE,
-		.size	=	KERNEL_SMI_SIZE,
-		.flags	=	MEMTYPE_FLAGS_FIXED,
-	},
+				.start = KERNEL_SMI_BASE,
+				.limit = KERNEL_SMI_SIZE,
+				.size = KERNEL_SMI_SIZE,
+				.flags = MEMTYPE_FLAGS_FIXED,
+				},
 	[MEMTYPE_SMI] = {
-	},
+			 },
 	[MEMTYPE_EBI0] = {
-		.flags	=	MEMTYPE_FLAGS_1M_ALIGN,
-	},
+			  .flags = MEMTYPE_FLAGS_1M_ALIGN,
+			  },
 	[MEMTYPE_EBI1] = {
-		.flags	=	MEMTYPE_FLAGS_1M_ALIGN,
-	},
+			  .flags = MEMTYPE_FLAGS_1M_ALIGN,
+			  },
 };
 
 static void __init reserve_ion_memory(void)
@@ -5553,7 +6267,7 @@ static void __init reserve_ion_memory(void)
 			if (ion_pdata.heaps[i].id == ION_SF_HEAP_ID) {
 				ion_pdata.heaps[i].size = msm_ion_sf_size;
 				pr_debug("msm_ion_sf_size 0x%x\n",
-					msm_ion_sf_size);
+					 msm_ion_sf_size);
 				break;
 			}
 		}
@@ -5565,12 +6279,13 @@ static void __init reserve_ion_memory(void)
 
 		if (heap->extra_data && heap->type == ION_HEAP_TYPE_CP) {
 			int map_all = ((struct ion_cp_heap_pdata *)
-				heap->extra_data)->iommu_map_all;
+				       heap->extra_data)->iommu_map_all;
 
-			if (map_all && (heap->size & (SZ_64K-1))) {
+			if (map_all && (heap->size & (SZ_64K - 1))) {
 				heap->size = ALIGN(heap->size, SZ_64K);
-				pr_err("Heap %s size is not a multiple of 64K. Adjusting size to %x\n",
-					heap->name, heap->size);
+				pr_err
+				    ("Heap %s size is not a multiple of 64K. Adjusting size to %x\n",
+				     heap->name, heap->size);
 
 			}
 		}
@@ -5595,8 +6310,8 @@ static void __init size_pmem_devices(void)
 		pmem_sf_size = MSM_HDMI_PRIM_PMEM_SF_SIZE;
 	android_pmem_pdata.size = pmem_sf_size;
 	android_pmem_audio_pdata.size = MSM_PMEM_AUDIO_SIZE;
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-#endif /*CONFIG_ANDROID_PMEM*/
+#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION */
+#endif /*CONFIG_ANDROID_PMEM */
 }
 
 #ifdef CONFIG_ANDROID_PMEM
@@ -5605,8 +6320,8 @@ static void __init reserve_memory_for(struct android_pmem_platform_data *p)
 {
 	msm8x60_reserve_table[p->memory_type].size += p->size;
 }
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
-#endif /*CONFIG_ANDROID_PMEM*/
+#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION */
+#endif /*CONFIG_ANDROID_PMEM */
 
 static void __init reserve_pmem_memory(void)
 {
@@ -5616,9 +6331,9 @@ static void __init reserve_pmem_memory(void)
 	reserve_memory_for(&android_pmem_smipool_pdata);
 	reserve_memory_for(&android_pmem_pdata);
 	reserve_memory_for(&android_pmem_audio_pdata);
-#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION*/
+#endif /*CONFIG_MSM_MULTIMEDIA_USE_ION */
 	msm8x60_reserve_table[MEMTYPE_EBI1].size += pmem_kernel_ebi1_size;
-#endif /*CONFIG_ANDROID_PMEM*/
+#endif /*CONFIG_ANDROID_PMEM */
 }
 
 static void __init reserve_mdp_memory(void);
@@ -5662,6 +6377,7 @@ static int __init prim_display_setup(char *param)
 		strlcpy(prim_panel_name, param, PANEL_NAME_MAX_LEN);
 	return 0;
 }
+
 early_param("prim_display", prim_display_setup);
 
 static int __init ext_display_setup(char *param)
@@ -5670,6 +6386,7 @@ static int __init ext_display_setup(char *param)
 		strlcpy(ext_panel_name, param, PANEL_NAME_MAX_LEN);
 	return 0;
 }
+
 early_param("ext_display", ext_display_setup);
 
 static void __init msm8x60_reserve(void)
@@ -5682,12 +6399,15 @@ static void __init msm8x60_reserve(void)
 #define EXT_CHG_VALID_MPP 10
 #define EXT_CHG_VALID_MPP_2 11
 
+#if defined(CONFIG_ISL9519_CHARGER) || defined (CONFIG_SMB137B_CHARGER) \
+		|| defined (CONFIG_SMB137B_CHARGER_MODULE)
 static struct pm8xxx_mpp_init_info isl_mpp[] = {
 	PM8058_MPP_INIT(EXT_CHG_VALID_MPP, D_INPUT,
-		PM8058_MPP_DIG_LEVEL_S3, DIN_TO_INT),
+			PM8058_MPP_DIG_LEVEL_S3, DIN_TO_INT),
 	PM8058_MPP_INIT(EXT_CHG_VALID_MPP_2, D_BI_DIR,
-		PM8058_MPP_DIG_LEVEL_S3, BI_PULLUP_10KOHM),
+			PM8058_MPP_DIG_LEVEL_S3, BI_PULLUP_10KOHM),
 };
+#endif
 
 #ifdef CONFIG_ISL9519_CHARGER
 static int isl_detection_setup(void)
@@ -5695,11 +6415,10 @@ static int isl_detection_setup(void)
 	int ret = 0, i;
 
 	for (i = 0; i < ARRAY_SIZE(isl_mpp); i++) {
-		ret = pm8xxx_mpp_config(isl_mpp[i].mpp,
-					&isl_mpp[i].config);
+		ret = pm8xxx_mpp_config(isl_mpp[i].mpp, &isl_mpp[i].config);
 		if (ret) {
 			pr_err("%s: Config MPP %d of PM8058 failed\n",
-						 __func__, isl_mpp[i].mpp);
+			       __func__, isl_mpp[i].mpp);
 			return ret;
 		}
 	}
@@ -5708,21 +6427,21 @@ static int isl_detection_setup(void)
 }
 
 static struct isl_platform_data isl_data __initdata = {
-	.chgcurrent		= 700,
-	.valid_n_gpio		= PM8058_MPP_PM_TO_SYS(10),
-	.chg_detection_config	= isl_detection_setup,
-	.max_system_voltage	= 4200,
-	.min_system_voltage	= 3200,
-	.term_current		= 120,
-	.input_current		= 2048,
+	.chgcurrent = 700,
+	.valid_n_gpio = PM8058_MPP_PM_TO_SYS(10),
+	.chg_detection_config = isl_detection_setup,
+	.max_system_voltage = 4200,
+	.min_system_voltage = 3200,
+	.term_current = 120,
+	.input_current = 2048,
 };
 
 static struct i2c_board_info isl_charger_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("isl9519q", 0x9),
-		.irq = PM8058_IRQ_BASE + PM8058_CBLPWR_IRQ,
-		.platform_data = &isl_data,
-	},
+	 I2C_BOARD_INFO("isl9519q", 0x9),
+	 .irq = PM8058_IRQ_BASE + PM8058_CBLPWR_IRQ,
+	 .platform_data = &isl_data,
+	 },
 };
 #endif
 
@@ -5732,11 +6451,10 @@ static int smb137b_detection_setup(void)
 	int ret = 0, i;
 
 	for (i = 0; i < ARRAY_SIZE(isl_mpp); i++) {
-		ret = pm8xxx_mpp_config(isl_mpp[i].mpp,
-					&isl_mpp[i].config);
+		ret = pm8xxx_mpp_config(isl_mpp[i].mpp, &isl_mpp[i].config);
 		if (ret) {
 			pr_err("%s: Config MPP %d of PM8058 failed\n",
-						 __func__, isl_mpp[i].mpp);
+			       __func__, isl_mpp[i].mpp);
 			return ret;
 		}
 	}
@@ -5752,10 +6470,10 @@ static struct smb137b_platform_data smb137b_data __initdata = {
 
 static struct i2c_board_info smb137b_charger_i2c_info[] __initdata = {
 	{
-		I2C_BOARD_INFO("smb137b", 0x08),
-		.irq = PM8058_IRQ_BASE + PM8058_CBLPWR_IRQ,
-		.platform_data = &smb137b_data,
-	},
+	 I2C_BOARD_INFO("smb137b", 0x08),
+	 .irq = PM8058_IRQ_BASE + PM8058_CBLPWR_IRQ,
+	 .platform_data = &smb137b_data,
+	 },
 };
 #endif
 
@@ -5768,224 +6486,211 @@ static int pm8058_gpios_init(void)
 	int i;
 	int rc;
 	struct pm8058_gpio_cfg {
-		int                gpio;
-		struct pm_gpio	   cfg;
+		int gpio;
+		struct pm_gpio cfg;
 	};
 
 	struct pm8058_gpio_cfg gpio_cfgs[] = {
-		{ /* FFA ethernet */
-			PM8058_GPIO_PM_TO_SYS(6),
-			{
-				.direction      = PM_GPIO_DIR_IN,
-				.pull           = PM_GPIO_PULL_DN,
-				.vin_sel        = 2,
-				.function       = PM_GPIO_FUNC_NORMAL,
-				.inv_int_pol    = 0,
-			},
-		},
+#ifndef CONFIG_MACH_MIONE
+		{		/* FFA ethernet */
+		 PM8058_GPIO_PM_TO_SYS(6),
+		 {
+		  .direction = PM_GPIO_DIR_IN,
+		  .pull = PM_GPIO_PULL_DN,
+		  .vin_sel = 2,
+		  .function = PM_GPIO_FUNC_NORMAL,
+		  .inv_int_pol = 0,
+		  },
+		 },
 		{
-			PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_SDC3_DET - 1),
-			{
-				.direction      = PM_GPIO_DIR_IN,
-				.pull           = PM_GPIO_PULL_UP_30,
-				.vin_sel        = 2,
-				.function       = PM_GPIO_FUNC_NORMAL,
-				.inv_int_pol    = 0,
-			},
-		},
-		{ /* core&surf gpio expander */
-			PM8058_GPIO_PM_TO_SYS(UI_INT1_N),
-			{
-				.direction      = PM_GPIO_DIR_IN,
-				.pull           = PM_GPIO_PULL_NO,
-				.vin_sel        = PM8058_GPIO_VIN_S3,
-				.function       = PM_GPIO_FUNC_NORMAL,
-				.inv_int_pol    = 0,
-			},
-		},
-		{ /* docking gpio expander */
-			PM8058_GPIO_PM_TO_SYS(UI_INT2_N),
-			{
-				.direction      = PM_GPIO_DIR_IN,
-				.pull           = PM_GPIO_PULL_NO,
-				.vin_sel        = PM8058_GPIO_VIN_S3,
-				.function       = PM_GPIO_FUNC_NORMAL,
-				.inv_int_pol    = 0,
-			},
-		},
-		{ /* FHA/keypad gpio expanders */
-			PM8058_GPIO_PM_TO_SYS(UI_INT3_N),
-			{
-				.direction      = PM_GPIO_DIR_IN,
-				.pull           = PM_GPIO_PULL_NO,
-				.vin_sel        = PM8058_GPIO_VIN_S3,
-				.function       = PM_GPIO_FUNC_NORMAL,
-				.inv_int_pol    = 0,
-			},
-		},
-		{ /* Timpani Reset */
-			PM8058_GPIO_PM_TO_SYS(20),
-			{
-				.direction	= PM_GPIO_DIR_OUT,
-				.output_value	= 1,
-				.output_buffer	= PM_GPIO_OUT_BUF_CMOS,
-				.pull		= PM_GPIO_PULL_DN,
-				.out_strength	= PM_GPIO_STRENGTH_HIGH,
-				.function	= PM_GPIO_FUNC_NORMAL,
-				.vin_sel	= 2,
-				.inv_int_pol	= 0,
-			}
-		},
-		{ /* PMIC ID interrupt */
-			PM8058_GPIO_PM_TO_SYS(36),
-			{
-				.direction	= PM_GPIO_DIR_IN,
-				.pull		= PM_GPIO_PULL_NO,
-				.function	= PM_GPIO_FUNC_NORMAL,
-				.vin_sel	= 2,
-				.inv_int_pol	= 0,
-			}
-		},
+		 PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_SDC3_DET - 1),
+		 {
+		  .direction = PM_GPIO_DIR_IN,
+		  .pull = PM_GPIO_PULL_UP_30,
+		  .vin_sel = 2,
+		  .function = PM_GPIO_FUNC_NORMAL,
+		  .inv_int_pol = 0,
+		  },
+		 },
+		{		/* core&surf gpio expander */
+		 PM8058_GPIO_PM_TO_SYS(UI_INT1_N),
+		 {
+		  .direction = PM_GPIO_DIR_IN,
+		  .pull = PM_GPIO_PULL_NO,
+		  .vin_sel = PM8058_GPIO_VIN_S3,
+		  .function = PM_GPIO_FUNC_NORMAL,
+		  .inv_int_pol = 0,
+		  },
+		 },
+		{		/* docking gpio expander */
+		 PM8058_GPIO_PM_TO_SYS(UI_INT2_N),
+		 {
+		  .direction = PM_GPIO_DIR_IN,
+		  .pull = PM_GPIO_PULL_NO,
+		  .vin_sel = PM8058_GPIO_VIN_S3,
+		  .function = PM_GPIO_FUNC_NORMAL,
+		  .inv_int_pol = 0,
+		  },
+		 },
+		{		/* FHA/keypad gpio expanders */
+		 PM8058_GPIO_PM_TO_SYS(UI_INT3_N),
+		 {
+		  .direction = PM_GPIO_DIR_IN,
+		  .pull = PM_GPIO_PULL_NO,
+		  .vin_sel = PM8058_GPIO_VIN_S3,
+		  .function = PM_GPIO_FUNC_NORMAL,
+		  .inv_int_pol = 0,
+		  },
+		 },
+#endif
+		{		/* Timpani Reset */
+		 PM8058_GPIO_PM_TO_SYS(20),
+		 {
+		  .direction = PM_GPIO_DIR_OUT,
+		  .output_value = 1,
+		  .output_buffer = PM_GPIO_OUT_BUF_CMOS,
+		  .pull = PM_GPIO_PULL_DN,
+		  .out_strength = PM_GPIO_STRENGTH_HIGH,
+		  .function = PM_GPIO_FUNC_NORMAL,
+		  .vin_sel = 2,
+		  .inv_int_pol = 0,
+		  }
+		 },
+#ifndef CONFIG_MACH_MIONE
+		{		/* PMIC ID interrupt */
+		 PM8058_GPIO_PM_TO_SYS(36),
+		 {
+		  .direction = PM_GPIO_DIR_IN,
+		  .pull = PM_GPIO_PULL_NO,
+		  .function = PM_GPIO_FUNC_NORMAL,
+		  .vin_sel = 2,
+		  .inv_int_pol = 0,
+		  }
+		 },
+#endif
+		{		/* PMIC IC for WIFI sleep CLK */
+		 PM8058_GPIO_PM_TO_SYS(XIAOMI_GPIO_PMIC_SLEEPCLOCK),
+		 {
+		  .direction = PM_GPIO_DIR_OUT,
+		  .output_buffer = PM_GPIO_OUT_BUF_CMOS,
+		  .output_value = 1,
+		  .pull = PM_GPIO_PULL_NO,
+		  .function = PM_GPIO_FUNC_2,
+		  .out_strength = PM_GPIO_STRENGTH_HIGH,
+		  .vin_sel = PM8058_GPIO_VIN_S3,
+		  }
+		 },
 	};
 
 #if defined(CONFIG_TOUCHDISC_VTD518_SHINETSU) || \
 		defined(CONFIG_TOUCHDISC_VTD518_SHINETSU_MODULE)
 	struct pm_gpio touchdisc_intr_gpio_cfg = {
-		.direction      = PM_GPIO_DIR_IN,
-		.pull           = PM_GPIO_PULL_UP_1P5,
-		.vin_sel        = 2,
-		.function       = PM_GPIO_FUNC_NORMAL,
-	};
-#endif
-
-#if defined(CONFIG_HAPTIC_ISA1200) || \
-			defined(CONFIG_HAPTIC_ISA1200_MODULE)
-	struct pm_gpio en_hap_gpio_cfg = {
-		.direction      = PM_GPIO_DIR_OUT,
-		.pull           = PM_GPIO_PULL_NO,
-		.out_strength   = PM_GPIO_STRENGTH_HIGH,
-		.function       = PM_GPIO_FUNC_NORMAL,
-		.inv_int_pol    = 0,
-		.vin_sel        = 2,
-		.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
-		.output_value   = 0,
+		.direction = PM_GPIO_DIR_IN,
+		.pull = PM_GPIO_PULL_UP_1P5,
+		.vin_sel = 2,
+		.function = PM_GPIO_FUNC_NORMAL,
 	};
 #endif
 
 #if defined(CONFIG_PMIC8058_OTHC) || defined(CONFIG_PMIC8058_OTHC_MODULE)
 	struct pm8058_gpio_cfg line_in_gpio_cfg = {
-			PM8058_GPIO_PM_TO_SYS(18),
-			{
-				.direction	= PM_GPIO_DIR_IN,
-				.pull           = PM_GPIO_PULL_UP_1P5,
-				.vin_sel        = 2,
-				.function       = PM_GPIO_FUNC_NORMAL,
-				.inv_int_pol    = 0,
-			}
+		PM8058_GPIO_PM_TO_SYS(18),
+		{
+		 .direction = PM_GPIO_DIR_IN,
+		 .pull = PM_GPIO_PULL_UP_1P5,
+		 .vin_sel = 2,
+		 .function = PM_GPIO_FUNC_NORMAL,
+		 .inv_int_pol = 0,
+		 }
 	};
 #endif
 
 #if defined(CONFIG_QS_S5K4E1)
-		{
-			struct pm8058_gpio_cfg qs_hc37_cam_pd_gpio_cfg = {
+	{
+		struct pm8058_gpio_cfg qs_hc37_cam_pd_gpio_cfg = {
 			PM8058_GPIO_PM_TO_SYS(26),
 			{
-				.direction		= PM_GPIO_DIR_OUT,
-				.output_value	= 0,
-				.output_buffer	= PM_GPIO_OUT_BUF_CMOS,
-				.pull			= PM_GPIO_PULL_DN,
-				.out_strength	= PM_GPIO_STRENGTH_HIGH,
-				.function		= PM_GPIO_FUNC_NORMAL,
-				.vin_sel		= 2,
-				.inv_int_pol	= 0,
-			}
+			 .direction = PM_GPIO_DIR_OUT,
+			 .output_value = 0,
+			 .output_buffer = PM_GPIO_OUT_BUF_CMOS,
+			 .pull = PM_GPIO_PULL_DN,
+			 .out_strength = PM_GPIO_STRENGTH_HIGH,
+			 .function = PM_GPIO_FUNC_NORMAL,
+			 .vin_sel = 2,
+			 .inv_int_pol = 0,
+			 }
 		};
 #endif
 #ifdef CONFIG_FB_MSM_LCDC_NT35582_WVGA
-	struct pm8058_gpio_cfg pmic_lcdc_nt35582_gpio_cfg = {
-		PM8058_GPIO_PM_TO_SYS(GPIO_NT35582_BL_EN_HW_PIN - 1),
-		{
-			.direction		= PM_GPIO_DIR_OUT,
-			.output_buffer	= PM_GPIO_OUT_BUF_CMOS,
-			.output_value	= 1,
-			.pull			= PM_GPIO_PULL_UP_30,
-			/* 2.9V  PM_GPIO_VIN_L2, which gives 2.6V */
-			.vin_sel		= PM8058_GPIO_VIN_L5,
-			.out_strength	= PM_GPIO_STRENGTH_HIGH,
-			.function		= PM_GPIO_FUNC_NORMAL,
-			.inv_int_pol	= 0,
-		}
-	};
-#endif
-#if defined(CONFIG_HAPTIC_ISA1200) || \
-			defined(CONFIG_HAPTIC_ISA1200_MODULE)
-	if (machine_is_msm8x60_fluid()) {
-		rc = pm8xxx_gpio_config(
-			PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_HAP_ENABLE),
-			&en_hap_gpio_cfg);
-		if (rc < 0) {
-			pr_err("%s: pmic haptics gpio config failed\n",
-							__func__);
-		}
-		rc = pm8xxx_gpio_config(
-			PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_HAP_LDO_ENABLE),
-			&en_hap_gpio_cfg);
-		if (rc < 0) {
-			pr_err("%s: pmic haptics ldo gpio config failed\n",
-							__func__);
-		}
-
-	}
+		struct pm8058_gpio_cfg pmic_lcdc_nt35582_gpio_cfg = {
+			PM8058_GPIO_PM_TO_SYS(GPIO_NT35582_BL_EN_HW_PIN - 1),
+			{
+			 .direction = PM_GPIO_DIR_OUT,
+			 .output_buffer = PM_GPIO_OUT_BUF_CMOS,
+			 .output_value = 1,
+			 .pull = PM_GPIO_PULL_UP_30,
+			 /* 2.9V  PM_GPIO_VIN_L2, which gives 2.6V */
+			 .vin_sel = PM8058_GPIO_VIN_L5,
+			 .out_strength = PM_GPIO_STRENGTH_HIGH,
+			 .function = PM_GPIO_FUNC_NORMAL,
+			 .inv_int_pol = 0,
+			 }
+		};
 #endif
 
 #if defined(CONFIG_TOUCHDISC_VTD518_SHINETSU) || \
 		defined(CONFIG_TOUCHDISC_VTD518_SHINETSU_MODULE)
-	if (machine_is_msm8x60_ffa() || machine_is_msm8x60_surf() ||
-		machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa()) {
-		rc = pm8xxx_gpio_config(
-			PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_TOUCH_DISC_INTR),
-			&touchdisc_intr_gpio_cfg);
-		if (rc < 0) {
-			pr_err("%s: Touchdisc interrupt gpio config failed\n",
-							__func__);
+		if (machine_is_msm8x60_ffa() || machine_is_msm8x60_surf() ||
+		    machine_is_msm8x60_fusion()
+		    || machine_is_msm8x60_fusn_ffa()) {
+			rc = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS
+						(PMIC_GPIO_TOUCH_DISC_INTR),
+						&touchdisc_intr_gpio_cfg);
+			if (rc < 0) {
+				pr_err
+				    ("%s: Touchdisc interrupt gpio config failed\n",
+				     __func__);
+			}
 		}
-	}
 #endif
 
 #if defined(CONFIG_PMIC8058_OTHC) || defined(CONFIG_PMIC8058_OTHC_MODULE)
-	/* Line_in only for 8660 ffa & surf */
-	if (machine_is_msm8x60_ffa() || machine_is_msm8x60_surf() ||
-		machine_is_msm8x60_fusion() || machine_is_msm8x60_dragon() ||
-		machine_is_msm8x60_fusn_ffa()) {
-		rc = pm8xxx_gpio_config(line_in_gpio_cfg.gpio,
-				&line_in_gpio_cfg.cfg);
-		if (rc < 0) {
-			pr_err("%s pmic line_in gpio config failed\n",
-							__func__);
-			return rc;
+		/* Line_in only for 8660 ffa & surf */
+		if (machine_is_msm8x60_ffa() || machine_is_msm8x60_surf() ||
+		    machine_is_msm8x60_fusion() || machine_is_msm8x60_dragon()
+		    || machine_is_msm8x60_fusn_ffa() || machine_is_mione()) {
+			rc = pm8xxx_gpio_config(line_in_gpio_cfg.gpio,
+						&line_in_gpio_cfg.cfg);
+			if (rc < 0) {
+				pr_err("%s pmic line_in gpio config failed\n",
+				       __func__);
+				return rc;
+			}
 		}
-	}
 #endif
 
 #ifdef CONFIG_FB_MSM_LCDC_NT35582_WVGA
-	if (machine_is_msm8x60_dragon()) {
-		rc = pm8xxx_gpio_config(pmic_lcdc_nt35582_gpio_cfg.gpio,
-				&pmic_lcdc_nt35582_gpio_cfg.cfg);
-		if (rc < 0) {
-			pr_err("%s pmic gpio config failed\n", __func__);
-			return rc;
+		if (machine_is_msm8x60_dragon()) {
+			rc = pm8xxx_gpio_config(pmic_lcdc_nt35582_gpio_cfg.gpio,
+						&pmic_lcdc_nt35582_gpio_cfg.
+						cfg);
+			if (rc < 0) {
+				pr_err("%s pmic gpio config failed\n",
+				       __func__);
+				return rc;
+			}
 		}
-	}
 #endif
 
 #if defined(CONFIG_QS_S5K4E1)
-		/* qs_cam_hc37_cam_pd only for 8660 fluid qs camera*/
+		/* qs_cam_hc37_cam_pd only for 8660 fluid qs camera */
 		if (machine_is_msm8x60_fluid()) {
 			rc = pm8xxx_gpio_config(qs_hc37_cam_pd_gpio_cfg.gpio,
-					&qs_hc37_cam_pd_gpio_cfg.cfg);
+						&qs_hc37_cam_pd_gpio_cfg.cfg);
 			if (rc < 0) {
-				pr_err("%s pmic qs_hc37_cam_pd gpio config failed\n",
-								__func__);
+				pr_err
+				    ("%s pmic qs_hc37_cam_pd gpio config failed\n",
+				     __func__);
 				return rc;
 			}
 		}
@@ -5993,11 +6698,9 @@ static int pm8058_gpios_init(void)
 #endif
 
 	for (i = 0; i < ARRAY_SIZE(gpio_cfgs); ++i) {
-		rc = pm8xxx_gpio_config(gpio_cfgs[i].gpio,
-				&gpio_cfgs[i].cfg);
+		rc = pm8xxx_gpio_config(gpio_cfgs[i].gpio, &gpio_cfgs[i].cfg);
 		if (rc < 0) {
-			pr_err("%s pmic gpio config failed\n",
-				__func__);
+			pr_err("%s pmic gpio config failed\n", __func__);
 			return rc;
 		}
 	}
@@ -6005,30 +6708,37 @@ static int pm8058_gpios_init(void)
 	return 0;
 }
 
-static const unsigned int ffa_keymap[] = {
-	KEY(0, 0, KEY_FN_F1),	 /* LS - PUSH1 */
-	KEY(0, 1, KEY_UP),	 /* NAV - UP */
-	KEY(0, 2, KEY_LEFT),	 /* NAV - LEFT */
-	KEY(0, 3, KEY_VOLUMEUP), /* Shuttle SW_UP */
+static const unsigned int mione_keymap[] = {
+	KEY(0, 4, KEY_VOLUMEUP),
+	KEY(0, 2, KEY_VOLUMEDOWN),
+	KEY(2, 2, KEY_CAMERA_FOCUS),
+	KEY(2, 4, KEY_CAMERA_SNAPSHOT),
+};
 
-	KEY(1, 0, KEY_FN_F2), 	 /* LS - PUSH2 */
-	KEY(1, 1, KEY_RIGHT),    /* NAV - RIGHT */
-	KEY(1, 2, KEY_DOWN),     /* NAV - DOWN */
+static const unsigned int ffa_keymap[] = {
+	KEY(0, 0, KEY_FN_F1),	/* LS - PUSH1 */
+	KEY(0, 1, KEY_UP),	/* NAV - UP */
+	KEY(0, 2, KEY_LEFT),	/* NAV - LEFT */
+	KEY(0, 3, KEY_VOLUMEUP),	/* Shuttle SW_UP */
+
+	KEY(1, 0, KEY_FN_F2),	/* LS - PUSH2 */
+	KEY(1, 1, KEY_RIGHT),	/* NAV - RIGHT */
+	KEY(1, 2, KEY_DOWN),	/* NAV - DOWN */
 	KEY(1, 3, KEY_VOLUMEDOWN),
 
-	KEY(2, 3, KEY_ENTER),     /* SW_PUSH key */
+	KEY(2, 3, KEY_ENTER),	/* SW_PUSH key */
 
-	KEY(4, 0, KEY_CAMERA_FOCUS), /* RS - PUSH1 */
-	KEY(4, 1, KEY_UP),	  /* USER_UP */
-	KEY(4, 2, KEY_LEFT),	  /* USER_LEFT */
-	KEY(4, 3, KEY_HOME),	  /* Right switch: MIC Bd */
-	KEY(4, 4, KEY_FN_F3),	  /* Reserved MIC */
+	KEY(4, 0, KEY_CAMERA_FOCUS),	/* RS - PUSH1 */
+	KEY(4, 1, KEY_UP),	/* USER_UP */
+	KEY(4, 2, KEY_LEFT),	/* USER_LEFT */
+	KEY(4, 3, KEY_HOME),	/* Right switch: MIC Bd */
+	KEY(4, 4, KEY_FN_F3),	/* Reserved MIC */
 
-	KEY(5, 0, KEY_CAMERA), /* RS - PUSH2 */
-	KEY(5, 1, KEY_RIGHT),	  /* USER_RIGHT */
-	KEY(5, 2, KEY_DOWN),	  /* USER_DOWN */
-	KEY(5, 3, KEY_BACK),	  /* Left switch: MIC */
-	KEY(5, 4, KEY_MENU),	  /* Center switch: MIC */
+	KEY(5, 0, KEY_CAMERA),	/* RS - PUSH2 */
+	KEY(5, 1, KEY_RIGHT),	/* USER_RIGHT */
+	KEY(5, 2, KEY_DOWN),	/* USER_DOWN */
+	KEY(5, 3, KEY_BACK),	/* Left switch: MIC */
+	KEY(5, 4, KEY_MENU),	/* Center switch: MIC */
 };
 
 static const unsigned int dragon_keymap[] = {
@@ -6061,23 +6771,42 @@ static const unsigned int dragon_keymap[] = {
 	KEY(4, 3, KEY_KBDILLUMTOGGLE),
 };
 
+static struct matrix_keymap_data mione_keymap_data = {
+	.keymap_size = ARRAY_SIZE(mione_keymap),
+	.keymap = mione_keymap,
+};
+
+static struct pm8xxx_keypad_platform_data mione_keypad_data = {
+	.input_name = "mione-keypad",
+	.input_phys_device = "mione-keypad/input0",
+	.num_rows = 6,
+	.num_cols = 5,
+	.rows_gpio_start = PM8058_GPIO_PM_TO_SYS(8),
+	.cols_gpio_start = PM8058_GPIO_PM_TO_SYS(0),
+	.debounce_ms = 15,
+	.scan_delay_ms = 32,
+	.row_hold_ns = 91500,
+	.wakeup = 1,
+	.keymap_data = &mione_keymap_data,
+};
+
 static struct matrix_keymap_data ffa_keymap_data = {
-	.keymap_size	= ARRAY_SIZE(ffa_keymap),
-	.keymap		= ffa_keymap,
+	.keymap_size = ARRAY_SIZE(ffa_keymap),
+	.keymap = ffa_keymap,
 };
 
 static struct pm8xxx_keypad_platform_data ffa_keypad_data = {
-	.input_name		= "ffa-keypad",
-	.input_phys_device	= "ffa-keypad/input0",
-	.num_rows		= 6,
-	.num_cols		= 5,
-	.rows_gpio_start	= PM8058_GPIO_PM_TO_SYS(8),
-	.cols_gpio_start	= PM8058_GPIO_PM_TO_SYS(0),
-	.debounce_ms		= 15,
-	.scan_delay_ms		= 32,
-	.row_hold_ns            = 91500,
-	.wakeup			= 1,
-	.keymap_data		= &ffa_keymap_data,
+	.input_name = "ffa-keypad",
+	.input_phys_device = "ffa-keypad/input0",
+	.num_rows = 6,
+	.num_cols = 5,
+	.rows_gpio_start = PM8058_GPIO_PM_TO_SYS(8),
+	.cols_gpio_start = PM8058_GPIO_PM_TO_SYS(0),
+	.debounce_ms = 15,
+	.scan_delay_ms = 32,
+	.row_hold_ns = 91500,
+	.wakeup = 1,
+	.keymap_data = &ffa_keymap_data,
 };
 
 static struct matrix_keymap_data dragon_keymap_data = {
@@ -6090,9 +6819,9 @@ static struct pm8xxx_keypad_platform_data dragon_keypad_data = {
 	.input_phys_device = "dragon-keypad/input0",
 	.num_rows = 6,
 	.num_cols = 5,
-	.rows_gpio_start	= PM8058_GPIO_PM_TO_SYS(8),
-	.cols_gpio_start	= PM8058_GPIO_PM_TO_SYS(0),
-	.debounce_ms		= 15,
+	.rows_gpio_start = PM8058_GPIO_PM_TO_SYS(8),
+	.cols_gpio_start = PM8058_GPIO_PM_TO_SYS(0),
+	.debounce_ms = 15,
 	.scan_delay_ms = 32,
 	.row_hold_ns = 91500,
 	.wakeup = 1,
@@ -6100,136 +6829,157 @@ static struct pm8xxx_keypad_platform_data dragon_keypad_data = {
 };
 
 static const unsigned int fluid_keymap[] = {
-	KEY(0, 0, KEY_FN_F1),	 /* LS - PUSH1 */
-	KEY(0, 1, KEY_UP),	 /* NAV - UP */
-	KEY(0, 2, KEY_LEFT),	 /* NAV - LEFT */
-	KEY(0, 3, KEY_VOLUMEDOWN), /* Shuttle SW_UP */
+	KEY(0, 0, KEY_FN_F1),	/* LS - PUSH1 */
+	KEY(0, 1, KEY_UP),	/* NAV - UP */
+	KEY(0, 2, KEY_LEFT),	/* NAV - LEFT */
+	KEY(0, 3, KEY_VOLUMEDOWN),	/* Shuttle SW_UP */
 
-	KEY(1, 0, KEY_FN_F2),	 /* LS - PUSH2 */
-	KEY(1, 1, KEY_RIGHT),    /* NAV - RIGHT */
-	KEY(1, 2, KEY_DOWN),     /* NAV - DOWN */
+	KEY(1, 0, KEY_FN_F2),	/* LS - PUSH2 */
+	KEY(1, 1, KEY_RIGHT),	/* NAV - RIGHT */
+	KEY(1, 2, KEY_DOWN),	/* NAV - DOWN */
 	KEY(1, 3, KEY_VOLUMEUP),
 
-	KEY(2, 3, KEY_ENTER),     /* SW_PUSH key */
+	KEY(2, 3, KEY_ENTER),	/* SW_PUSH key */
 
-	KEY(4, 0, KEY_CAMERA_FOCUS), /* RS - PUSH1 */
-	KEY(4, 1, KEY_UP),	  /* USER_UP */
-	KEY(4, 2, KEY_LEFT),	  /* USER_LEFT */
-	KEY(4, 3, KEY_HOME),	  /* Right switch: MIC Bd */
-	KEY(4, 4, KEY_FN_F3),	  /* Reserved MIC */
+	KEY(4, 0, KEY_CAMERA_FOCUS),	/* RS - PUSH1 */
+	KEY(4, 1, KEY_UP),	/* USER_UP */
+	KEY(4, 2, KEY_LEFT),	/* USER_LEFT */
+	KEY(4, 3, KEY_HOME),	/* Right switch: MIC Bd */
+	KEY(4, 4, KEY_FN_F3),	/* Reserved MIC */
 
-	KEY(5, 0, KEY_CAMERA), /* RS - PUSH2 */
-	KEY(5, 1, KEY_RIGHT),	  /* USER_RIGHT */
-	KEY(5, 2, KEY_DOWN),	  /* USER_DOWN */
-	KEY(5, 3, KEY_BACK),	  /* Left switch: MIC */
-	KEY(5, 4, KEY_MENU),	  /* Center switch: MIC */
+	KEY(5, 0, KEY_CAMERA),	/* RS - PUSH2 */
+	KEY(5, 1, KEY_RIGHT),	/* USER_RIGHT */
+	KEY(5, 2, KEY_DOWN),	/* USER_DOWN */
+	KEY(5, 3, KEY_BACK),	/* Left switch: MIC */
+	KEY(5, 4, KEY_MENU),	/* Center switch: MIC */
 };
 
 static struct matrix_keymap_data fluid_keymap_data = {
-	.keymap_size	= ARRAY_SIZE(fluid_keymap),
-	.keymap		= fluid_keymap,
+	.keymap_size = ARRAY_SIZE(fluid_keymap),
+	.keymap = fluid_keymap,
 };
 
 static struct pm8xxx_keypad_platform_data fluid_keypad_data = {
-	.input_name		= "fluid-keypad",
-	.input_phys_device	= "fluid-keypad/input0",
-	.num_rows		= 6,
-	.num_cols		= 5,
-	.rows_gpio_start	= PM8058_GPIO_PM_TO_SYS(8),
-	.cols_gpio_start	= PM8058_GPIO_PM_TO_SYS(0),
-	.debounce_ms		= 15,
-	.scan_delay_ms		= 32,
-	.row_hold_ns            = 91500,
-	.wakeup			= 1,
-	.keymap_data		= &fluid_keymap_data,
+	.input_name = "fluid-keypad",
+	.input_phys_device = "fluid-keypad/input0",
+	.num_rows = 6,
+	.num_cols = 5,
+	.rows_gpio_start = PM8058_GPIO_PM_TO_SYS(8),
+	.cols_gpio_start = PM8058_GPIO_PM_TO_SYS(0),
+	.debounce_ms = 15,
+	.scan_delay_ms = 32,
+	.row_hold_ns = 91500,
+	.wakeup = 1,
+	.keymap_data = &fluid_keymap_data,
 };
 
 static struct pm8xxx_vibrator_platform_data pm8058_vib_pdata = {
-	.initial_vibrate_ms  = 500,
+	.initial_vibrate_ms = 500,
 	.level_mV = 3000,
 	.max_timeout_ms = 15000,
 };
 
 static struct pm8xxx_rtc_platform_data pm8058_rtc_pdata = {
-	.rtc_write_enable       = false,
+	.rtc_write_enable	= false,
 	.rtc_alarm_powerup	= false,
 };
 
 static struct pm8xxx_pwrkey_platform_data pm8058_pwrkey_pdata = {
-	.pull_up		= 1,
-	.kpd_trigger_delay_us   = 15625,
-	.wakeup			= 1,
+	.pull_up = 1,
+	.kpd_trigger_delay_us = 15625,
+	.wakeup = 1,
 };
 
 #define PM8058_LINE_IN_DET_GPIO	PM8058_GPIO_PM_TO_SYS(18)
 
-static struct othc_accessory_info othc_accessories[]  = {
+static struct othc_accessory_info othc_accessories[] = {
 	{
-		.accessory = OTHC_SVIDEO_OUT,
-		.detect_flags = OTHC_MICBIAS_DETECT | OTHC_SWITCH_DETECT
-							| OTHC_ADC_DETECT,
-		.key_code = SW_VIDEOOUT_INSERT,
-		.enabled = false,
-		.adc_thres = {
-				.min_threshold = 20,
-				.max_threshold = 40,
-			},
-	},
+	 .accessory = OTHC_SVIDEO_OUT,
+	 .detect_flags = OTHC_MICBIAS_DETECT | OTHC_SWITCH_DETECT
+	 | OTHC_ADC_DETECT,
+	 .key_code = SW_VIDEOOUT_INSERT,
+	 .enabled = false,
+	 .adc_thres = {
+		       .min_threshold = 20,
+		       .max_threshold = 40,
+		       },
+	 },
 	{
-		.accessory = OTHC_ANC_HEADPHONE,
-		.detect_flags = OTHC_MICBIAS_DETECT | OTHC_GPIO_DETECT |
-							OTHC_SWITCH_DETECT,
-		.gpio = PM8058_LINE_IN_DET_GPIO,
-		.active_low = 1,
-		.key_code = SW_HEADPHONE_INSERT,
-		.enabled = true,
-	},
+	 .accessory = OTHC_ANC_HEADPHONE,
+	 .detect_flags = OTHC_MICBIAS_DETECT | OTHC_GPIO_DETECT |
+	 OTHC_SWITCH_DETECT,
+	 .gpio = PM8058_LINE_IN_DET_GPIO,
+	 .active_low = 1,
+	 .key_code = SW_HEADPHONE_INSERT,
+	 .enabled = true,
+	 },
 	{
-		.accessory = OTHC_ANC_HEADSET,
-		.detect_flags = OTHC_MICBIAS_DETECT | OTHC_GPIO_DETECT,
-		.gpio = PM8058_LINE_IN_DET_GPIO,
-		.active_low = 1,
-		.key_code = SW_HEADPHONE_INSERT,
-		.enabled = true,
-	},
+	 .accessory = OTHC_ANC_HEADSET,
+	 .detect_flags = OTHC_MICBIAS_DETECT | OTHC_GPIO_DETECT,
+	 .gpio = PM8058_LINE_IN_DET_GPIO,
+	 .active_low = 1,
+	 .key_code = SW_HEADPHONE_INSERT,
+	 .enabled = true,
+	 },
 	{
-		.accessory = OTHC_HEADPHONE,
-		.detect_flags = OTHC_MICBIAS_DETECT | OTHC_SWITCH_DETECT,
-		.key_code = SW_HEADPHONE_INSERT,
-		.enabled = true,
-	},
+	 .accessory = OTHC_HEADPHONE,
+	 .detect_flags = OTHC_MICBIAS_DETECT | OTHC_SWITCH_DETECT |
+	 OTHC_GPIO_DETECT,
+	 .gpio = PM8058_LINE_IN_DET_GPIO,
+	 .active_low = 1,
+	 .key_code = SW_HEADPHONE_INSERT,
+	 .enabled = true,
+	 },
 	{
-		.accessory = OTHC_MICROPHONE,
-		.detect_flags = OTHC_GPIO_DETECT,
-		.gpio = PM8058_LINE_IN_DET_GPIO,
-		.active_low = 1,
-		.key_code = SW_MICROPHONE_INSERT,
-		.enabled = true,
-	},
+	 .accessory = OTHC_MICROPHONE,
+	 .detect_flags = OTHC_GPIO_DETECT,
+	 .gpio = PM8058_LINE_IN_DET_GPIO,
+	 .active_low = 1,
+	 .key_code = SW_MICROPHONE_INSERT,
+	 .enabled = true,
+	 },
 	{
-		.accessory = OTHC_HEADSET,
-		.detect_flags = OTHC_MICBIAS_DETECT,
-		.key_code = SW_HEADPHONE_INSERT,
-		.enabled = true,
-	},
+	 .accessory = OTHC_HEADSET,
+	 .detect_flags = OTHC_MICBIAS_DETECT | OTHC_GPIO_DETECT |
+	 OTHC_ADC_DETECT,
+	 .gpio = PM8058_LINE_IN_DET_GPIO,
+	 .active_low = 1,
+	 .key_code = SW_HEADPHONE_INSERT,
+	 .enabled = true,
+	 .adc_thres = {
+		       .min_threshold = 1000,
+		       .max_threshold = 1600,
+		       },
+	 },
+	{
+	 /* for those headsets which has adc value out of above range
+	  * we may not be able to use its mic
+	  * so to detect it as OTHC_OTHC_HEADPHONE
+	  */
+	 .accessory = OTHC_HEADPHONE,
+	 .detect_flags = OTHC_MICBIAS_DETECT | OTHC_GPIO_DETECT,
+	 .key_code = SW_HEADPHONE_INSERT,
+	 .enabled = true,
+	 },
+
 };
 
 static struct othc_switch_info switch_info[] = {
 	{
-		.min_adc_threshold = 0,
-		.max_adc_threshold = 100,
-		.key_code = KEY_PLAYPAUSE,
-	},
+	 .min_adc_threshold = 0,
+	 .max_adc_threshold = 80,
+	 .key_code = KEY_PLAYPAUSE,
+	 },
 	{
-		.min_adc_threshold = 100,
-		.max_adc_threshold = 200,
-		.key_code = KEY_REWIND,
-	},
+	 .min_adc_threshold = 81,
+	 .max_adc_threshold = 200,
+	 .key_code = KEY_REWIND,
+	 },
 	{
-		.min_adc_threshold = 200,
-		.max_adc_threshold = 500,
-		.key_code = KEY_FASTFORWARD,
-	},
+	 .min_adc_threshold = 201,
+	 .max_adc_threshold = 500,
+	 .key_code = KEY_FASTFORWARD,
+	 },
 };
 
 static struct othc_n_switch_config switch_config = {
@@ -6238,7 +6988,7 @@ static struct othc_n_switch_config switch_config = {
 	.adc_channel = CHANNEL_ADC_HDSET,
 	.switch_info = switch_info,
 	.num_keys = ARRAY_SIZE(switch_info),
-	.default_sw_en = true,
+	.default_sw_en = false,
 	.default_sw_idx = 0,
 };
 
@@ -6254,6 +7004,36 @@ static struct hsed_bias_config hsed_bias_config = {
 	.othc_wakeup = 1,
 };
 
+#ifdef CONFIG_MSM_HEADSET_UART_DYNAMIC_SWITCH
+int enable_hsed_route(int enable)
+{
+	int ret = 0;
+
+	if (enable) {
+		/* route to headset connection */
+		ret = gpio_request(XIAOMI_GPIO_HS_UART_SWITCH_EN,
+				   "hs_uart_switch_en");
+		if (ret) {
+			pr_err("%s:Failed to request GPIO %d\n", __func__,
+			       XIAOMI_GPIO_HS_UART_SWITCH_EN);
+			return ret;
+		}
+		ret = gpio_direction_output(XIAOMI_GPIO_HS_UART_SWITCH_EN, 0);
+		if (ret)
+			pr_err("%s:Failed to configure (HIGH) GPIO %d\n",
+			       __func__, XIAOMI_GPIO_HS_UART_SWITCH_EN);
+	} else {
+		/* route back to uart connection */
+		ret = gpio_direction_output(XIAOMI_GPIO_HS_UART_SWITCH_EN, 1);
+		if (ret)
+			pr_err("%s:Failed to configure (LOW) GPIO %d\n",
+			       __func__, XIAOMI_GPIO_HS_UART_SWITCH_EN);
+		gpio_free(XIAOMI_GPIO_HS_UART_SWITCH_EN);
+	}
+	return ret;
+}
+#endif
+
 static struct othc_hsed_config hsed_config_1 = {
 	.hsed_bias_config = &hsed_bias_config,
 	/*
@@ -6263,22 +7043,26 @@ static struct othc_hsed_config hsed_config_1 = {
 	 * This will introduce a delay in reporting the accessory
 	 * insertion and removal to the userspace.
 	 */
-	.detection_delay_ms = 1500,
+	.detection_delay_ms = 500,
 	/* Switch info */
-	.switch_debounce_ms = 1500,
+	.switch_debounce_ms = 500,
 	.othc_support_n_switch = false,
 	.switch_config = &switch_config,
-	.ir_gpio = -1,
+	/* for Mione we have a detection pin for Headset */
+	.ir_gpio = PM8058_LINE_IN_DET_GPIO,
 	/* Accessory info */
 	.accessories_support = true,
 	.accessories = othc_accessories,
 	.othc_num_accessories = ARRAY_SIZE(othc_accessories),
+#ifdef CONFIG_MSM_HEADSET_UART_DYNAMIC_SWITCH
+	.enable = enable_hsed_route,
+#endif
 };
 
 static struct othc_regulator_config othc_reg = {
-	.regulator	 = "8058_l5",
-	.max_uV		 = 2850000,
-	.min_uV		 = 2850000,
+	.regulator = "8058_l5",
+	.max_uV = 2850000,
+	.min_uV = 2850000,
 };
 
 /* MIC_BIAS0 is configured as normal MIC BIAS */
@@ -6307,19 +7091,18 @@ static struct pmic8058_othc_config_pdata othc_config_pdata_2 = {
 	.micbias_regulator = &othc_reg,
 };
 
-
 static void __init msm8x60_init_pm8058_othc(void)
 {
 	int i;
 
 	if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 2 ||
-		machine_is_msm8x60_fluid() || machine_is_msm8x60_fusion() ||
-		machine_is_msm8x60_fusn_ffa()) {
+	    machine_is_msm8x60_fluid() || machine_is_msm8x60_fusion() ||
+	    machine_is_msm8x60_fusn_ffa()) {
 		/* 3-switch headset supported only by V2 FFA and FLUID */
 		hsed_config_1.accessories_adc_support = true,
-		/* ADC based accessory detection works only on V2 and FLUID */
-		hsed_config_1.accessories_adc_channel = CHANNEL_ADC_HDSET,
-		hsed_config_1.othc_support_n_switch = true;
+		    /* ADC based accessory detection works only on V2 and FLUID */
+		    hsed_config_1.accessories_adc_channel = CHANNEL_ADC_HDSET,
+		    hsed_config_1.othc_support_n_switch = true;
 	}
 
 	/* IR GPIO is absent on FLUID */
@@ -6341,21 +7124,31 @@ static void __init msm8x60_init_pm8058_othc(void)
 				hsed_config_1.video_out_gpio = GPIO_HS_SW_DIR;
 				break;
 			}
+		} else if (machine_is_mione()) {
+			switch (othc_accessories[i].accessory) {
+			case OTHC_ANC_HEADPHONE:
+			case OTHC_ANC_HEADSET:
+			case OTHC_MICROPHONE:
+				othc_accessories[i].enabled = false;
+				break;
+			case OTHC_HEADPHONE:
+			case OTHC_HEADSET:
+				break;
+			}
 		}
 	}
 }
 
-
 static int pm8058_pwm_config(struct pwm_device *pwm, int ch, int on)
 {
 	struct pm_gpio pwm_gpio_config = {
-		.direction      = PM_GPIO_DIR_OUT,
-		.output_buffer  = PM_GPIO_OUT_BUF_CMOS,
-		.output_value   = 0,
-		.pull           = PM_GPIO_PULL_NO,
-		.vin_sel        = PM8058_GPIO_VIN_VPH,
-		.out_strength   = PM_GPIO_STRENGTH_HIGH,
-		.function       = PM_GPIO_FUNC_2,
+		.direction = PM_GPIO_DIR_OUT,
+		.output_buffer = PM_GPIO_OUT_BUF_CMOS,
+		.output_value = 0,
+		.pull = PM_GPIO_PULL_NO,
+		.vin_sel = PM8058_GPIO_VIN_S3,
+		.out_strength = PM_GPIO_STRENGTH_HIGH,
+		.function = PM_GPIO_FUNC_2,
 	};
 
 	int rc = -EINVAL;
@@ -6369,17 +7162,34 @@ static int pm8058_pwm_config(struct pwm_device *pwm, int ch, int on)
 		if (on) {
 			id = 24 + ch;
 			rc = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(id - 1),
-							&pwm_gpio_config);
+						&pwm_gpio_config);
 			if (rc)
 				pr_err("%s: pm8xxx_gpio_config(%d): rc=%d\n",
-					__func__, id, rc);
+				       __func__, id, rc);
 		}
+		break;
+	case 3:
+		id = PM_PWM_LED_KPD;
+		mode = PM_PWM_CONF_DTEST3;
+		max_mA = 200;
+		break;
+
+	case 4:
+		id = PM_PWM_LED_0;
+		mode = PM_PWM_CONF_PWM1;
+		max_mA = 40;
+		break;
+
+	case 5:
+		id = PM_PWM_LED_1;
+		mode = PM_PWM_CONF_PWM2;
+		max_mA = 40;
 		break;
 
 	case 6:
-		id = PM_PWM_LED_FLASH;
-		mode = PM_PWM_CONF_PWM1;
-		max_mA = 300;
+		id = PM_PWM_LED_2;
+		mode = PM_PWM_CONF_PWM3;
+		max_mA = 40;
 		break;
 
 	case 7:
@@ -6392,7 +7202,7 @@ static int pm8058_pwm_config(struct pwm_device *pwm, int ch, int on)
 		break;
 	}
 
-	if (ch >= 6 && ch <= 7) {
+	if (ch >= 3 && ch <= 7) {
 		if (!on) {
 			mode = PM_PWM_CONF_NONE;
 			max_mA = 0;
@@ -6407,142 +7217,176 @@ static int pm8058_pwm_config(struct pwm_device *pwm, int ch, int on)
 }
 
 static struct pm8058_pwm_pdata pm8058_pwm_data = {
-	.config		= pm8058_pwm_config,
+	.config = pm8058_pwm_config,
 };
 
 #define PM8058_GPIO_INT           88
 
 static struct pmic8058_led pmic8058_flash_leds[] = {
 	[0] = {
-		.name		= "camera:flash0",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_FLASH_LED_0,
-	},
+	       .name = "camera:flash0",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_FLASH_LED_0,
+	       },
 	[1] = {
-		.name		= "camera:flash1",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_FLASH_LED_1,
-	},
+	       .name = "camera:flash1",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_FLASH_LED_1,
+	       },
 };
 
 static struct pmic8058_leds_platform_data pm8058_flash_leds_data = {
 	.num_leds = ARRAY_SIZE(pmic8058_flash_leds),
-	.leds	= pmic8058_flash_leds,
+	.leds = pmic8058_flash_leds,
+};
+
+static struct pmic8058_led pmic8058_mione_pwm_leds[] = {
+	[0] = {
+	       .name = "red",
+	       .max_brightness = 255,
+	       .id = PMIC8058_ID_LED_0,
+	       .pwm_id = 4,
+	       .pwm_period_ns = 1000,
+	       },
+	[1] = {
+	       .name = "blue",
+	       .max_brightness = 255,
+	       .id = PMIC8058_ID_LED_1,
+	       .pwm_id = 5,
+	       .pwm_period_ns = 1000,
+	       },
+	[2] = {
+	       .name = "green",
+	       .max_brightness = 255,
+	       .id = PMIC8058_ID_LED_2,
+	       .pwm_id = 6,
+	       .pwm_period_ns = 1000,
+	       },
+	[3] = {
+	       .name = "button-backlight",
+	       .max_brightness = 255,
+	       .id = PMIC8058_ID_LED_KB_LIGHT,
+	       },
+};
+
+static struct pmic8058_leds_platform_data pm8058_mione_pwm_leds_data = {
+	.num_leds = ARRAY_SIZE(pmic8058_mione_pwm_leds),
+	.leds = pmic8058_mione_pwm_leds,
 };
 
 static struct pmic8058_led pmic8058_dragon_leds[] = {
 	[0] = {
-		/* RED */
-		.name		= "led_drv0",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_LED_0,
-	},/* 300 mA flash led0 drv sink */
+	       /* RED */
+	       .name = "led_drv0",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_LED_0,
+	       },		/* 300 mA flash led0 drv sink */
 	[1] = {
-		/* Yellow */
-		.name		= "led_drv1",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_LED_1,
-	},/* 300 mA flash led0 drv sink */
+	       /* Yellow */
+	       .name = "led_drv1",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_LED_1,
+	       },		/* 300 mA flash led0 drv sink */
 	[2] = {
-		/* Green */
-		.name		= "led_drv2",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_LED_2,
-	},/* 300 mA flash led0 drv sink */
+	       /* Green */
+	       .name = "led_drv2",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_LED_2,
+	       },		/* 300 mA flash led0 drv sink */
 	[3] = {
-		.name		= "led_psensor",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_LED_KB_LIGHT,
-	},/* 300 mA flash led0 drv sink */
+	       .name = "led_psensor",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_LED_KB_LIGHT,
+	       },		/* 300 mA flash led0 drv sink */
 };
 
 static struct pmic8058_leds_platform_data pm8058_dragon_leds_data = {
 	.num_leds = ARRAY_SIZE(pmic8058_dragon_leds),
-	.leds	= pmic8058_dragon_leds,
+	.leds = pmic8058_dragon_leds,
 };
 
 static struct pmic8058_led pmic8058_fluid_flash_leds[] = {
 	[0] = {
-		.name		= "led:drv0",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_FLASH_LED_0,
-	},/* 300 mA flash led0 drv sink */
+	       .name = "led:drv0",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_FLASH_LED_0,
+	       },		/* 300 mA flash led0 drv sink */
 	[1] = {
-		.name		= "led:drv1",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_FLASH_LED_1,
-	},/* 300 mA flash led1 sink */
+	       .name = "led:drv1",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_FLASH_LED_1,
+	       },		/* 300 mA flash led1 sink */
 	[2] = {
-		.name		= "led:drv2",
-		.max_brightness = 20,
-		.id		= PMIC8058_ID_LED_0,
-	},/* 40 mA led0 sink */
+	       .name = "led:drv2",
+	       .max_brightness = 20,
+	       .id = PMIC8058_ID_LED_0,
+	       },		/* 40 mA led0 sink */
 	[3] = {
-		.name		= "keypad:drv",
-		.max_brightness = 15,
-		.id		= PMIC8058_ID_LED_KB_LIGHT,
-	},/* 300 mA keypad drv sink */
+	       .name = "keypad:drv",
+	       .max_brightness = 15,
+	       .id = PMIC8058_ID_LED_KB_LIGHT,
+	       },		/* 300 mA keypad drv sink */
 };
 
 static struct pmic8058_leds_platform_data pm8058_fluid_flash_leds_data = {
 	.num_leds = ARRAY_SIZE(pmic8058_fluid_flash_leds),
-	.leds	= pmic8058_fluid_flash_leds,
+	.leds = pmic8058_fluid_flash_leds,
 };
 
 static struct pmic8058_charger_data pmic8058_charger_dragon = {
-		.charger_data_valid = true,
-		.max_source_current = 1800,
-		.charger_type = CHG_TYPE_AC,
+	.charger_data_valid = true,
+	.max_source_current = 1800,
+	.charger_type = CHG_TYPE_AC,
 };
 
 static struct pmic8058_charger_data pmic8058_charger_ffa_surf = {
-		.charger_data_valid = false,
+	.charger_data_valid = false,
 };
 
 static struct pm8xxx_misc_platform_data pm8058_misc_pdata = {
-	.priority		= 0,
+	.priority = 0,
 };
 
 static struct pm8xxx_irq_platform_data pm8058_irq_pdata = {
-	.irq_base		= PM8058_IRQ_BASE,
-	.devirq			= MSM_GPIO_TO_INT(PM8058_GPIO_INT),
-	.irq_trigger_flag	= IRQF_TRIGGER_LOW,
+	.irq_base = PM8058_IRQ_BASE,
+	.devirq = MSM_GPIO_TO_INT(PM8058_GPIO_INT),
+	.irq_trigger_flag = IRQF_TRIGGER_LOW,
 };
 
 static struct pm8xxx_gpio_platform_data pm8058_gpio_pdata = {
-	.gpio_base	= PM8058_GPIO_PM_TO_SYS(0),
+	.gpio_base = PM8058_GPIO_PM_TO_SYS(0),
 };
 
 static struct pm8xxx_mpp_platform_data pm8058_mpp_pdata = {
-	.mpp_base	= PM8058_MPP_PM_TO_SYS(0),
+	.mpp_base = PM8058_MPP_PM_TO_SYS(0),
 };
 
 static struct pm8058_platform_data pm8058_platform_data = {
-	.irq_pdata		= &pm8058_irq_pdata,
-	.gpio_pdata		= &pm8058_gpio_pdata,
-	.mpp_pdata		= &pm8058_mpp_pdata,
-	.rtc_pdata		= &pm8058_rtc_pdata,
-	.pwrkey_pdata		= &pm8058_pwrkey_pdata,
-	.othc0_pdata		= &othc_config_pdata_0,
-	.othc1_pdata		= &othc_config_pdata_1,
-	.othc2_pdata		= &othc_config_pdata_2,
-	.pwm_pdata		= &pm8058_pwm_data,
-	.misc_pdata		= &pm8058_misc_pdata,
+	.irq_pdata = &pm8058_irq_pdata,
+	.gpio_pdata = &pm8058_gpio_pdata,
+	.mpp_pdata = &pm8058_mpp_pdata,
+	.rtc_pdata = &pm8058_rtc_pdata,
+	.pwrkey_pdata = &pm8058_pwrkey_pdata,
+	.othc0_pdata = &othc_config_pdata_0,
+	.othc1_pdata = &othc_config_pdata_1,
+	.othc2_pdata = &othc_config_pdata_2,
+	.pwm_pdata = &pm8058_pwm_data,
+	.misc_pdata = &pm8058_misc_pdata,
 #ifdef CONFIG_SENSORS_MSM_ADC
-	.xoadc_pdata		= &pm8058_xoadc_pdata,
+	.xoadc_pdata = &pm8058_xoadc_pdata,
 #endif
 };
 
 #ifdef CONFIG_MSM_SSBI
 static struct msm_ssbi_platform_data msm8x60_ssbi_pm8058_pdata __devinitdata = {
 	.controller_type = MSM_SBI_CTRL_PMIC_ARBITER,
-	.slave	= {
-		.name			= "pm8058-core",
-		.platform_data		= &pm8058_platform_data,
-	},
+	.slave = {
+		  .name = "pm8058-core",
+		  .platform_data = &pm8058_platform_data,
+		  },
 };
 #endif
-#endif  /* CONFIG_PMIC8058 */
+#endif /* CONFIG_PMIC8058 */
 
 #if defined(CONFIG_TOUCHDISC_VTD518_SHINETSU) || \
 		defined(CONFIG_TOUCHDISC_VTD518_SHINETSU_MODULE)
@@ -6556,9 +7400,10 @@ static const char *vregs_tdisc_name[] = {
 };
 
 static const int vregs_tdisc_val[] = {
-	2850000,/* uV */
+	2850000,		/* uV */
 	1800000,
 };
+
 static struct regulator *vregs_tdisc[ARRAY_SIZE(vregs_tdisc_name)];
 
 static int tdisc_shinetsu_setup(void)
@@ -6568,21 +7413,22 @@ static int tdisc_shinetsu_setup(void)
 	rc = gpio_request(PMIC_GPIO_TDISC, "tdisc_interrupt");
 	if (rc) {
 		pr_err("%s: gpio_request failed for PMIC_GPIO_TDISC\n",
-								__func__);
+		       __func__);
 		return rc;
 	}
 
 	rc = gpio_request(GPIO_JOYSTICK_EN, "tdisc_oe");
 	if (rc) {
 		pr_err("%s: gpio_request failed for GPIO_JOYSTICK_EN\n",
-							__func__);
+		       __func__);
 		goto fail_gpio_oe;
 	}
 
 	rc = gpio_direction_output(GPIO_JOYSTICK_EN, 1);
 	if (rc) {
-		pr_err("%s: gpio_direction_output failed for GPIO_JOYSTICK_EN\n",
-								__func__);
+		pr_err
+		    ("%s: gpio_direction_output failed for GPIO_JOYSTICK_EN\n",
+		     __func__);
 		gpio_free(GPIO_JOYSTICK_EN);
 		goto fail_gpio_oe;
 	}
@@ -6591,17 +7437,18 @@ static int tdisc_shinetsu_setup(void)
 		vregs_tdisc[i] = regulator_get(NULL, vregs_tdisc_name[i]);
 		if (IS_ERR(vregs_tdisc[i])) {
 			printk(KERN_ERR "%s: regulator get %s failed (%ld)\n",
-				__func__, vregs_tdisc_name[i],
-				PTR_ERR(vregs_tdisc[i]));
+			       __func__, vregs_tdisc_name[i],
+			       PTR_ERR(vregs_tdisc[i]));
 			rc = PTR_ERR(vregs_tdisc[i]);
 			goto vreg_get_fail;
 		}
 
 		rc = regulator_set_voltage(vregs_tdisc[i],
-				vregs_tdisc_val[i], vregs_tdisc_val[i]);
+					   vregs_tdisc_val[i],
+					   vregs_tdisc_val[i]);
 		if (rc) {
 			printk(KERN_ERR "%s: regulator_set_voltage() = %d\n",
-				__func__, rc);
+			       __func__, rc);
 			goto vreg_set_voltage_fail;
 		}
 	}
@@ -6636,7 +7483,7 @@ static int tdisc_shinetsu_enable(void)
 		rc = regulator_enable(vregs_tdisc[i]);
 		if (rc < 0) {
 			printk(KERN_ERR "%s: vreg %s enable failed (%d)\n",
-				__func__, vregs_tdisc_name[i], rc);
+			       __func__, vregs_tdisc_name[i], rc);
 			goto vreg_fail;
 		}
 	}
@@ -6661,7 +7508,7 @@ static int tdisc_shinetsu_disable(void)
 		rc = regulator_disable(vregs_tdisc[i]);
 		if (rc < 0) {
 			printk(KERN_ERR "%s: vreg %s disable failed (%d)\n",
-				__func__, vregs_tdisc_name[i], rc);
+			       __func__, vregs_tdisc_name[i], rc);
 			goto tdisc_reg_fail;
 		}
 	}
@@ -6691,7 +7538,7 @@ static struct tdisc_platform_data tdisc_data = {
 	.tdisc_release = tdisc_shinetsu_release,
 	.tdisc_enable = tdisc_shinetsu_enable,
 	.tdisc_disable = tdisc_shinetsu_disable,
-	.tdisc_wakeup  = 0,
+	.tdisc_wakeup = 0,
 	.tdisc_gpio = PMIC_GPIO_TDISC,
 	.tdisc_report_keys = true,
 	.tdisc_report_relative = true,
@@ -6699,15 +7546,15 @@ static struct tdisc_platform_data tdisc_data = {
 	.tdisc_report_wheel = false,
 	.tdisc_reverse_x = false,
 	.tdisc_reverse_y = true,
-	.tdisc_abs  = &tdisc_abs,
+	.tdisc_abs = &tdisc_abs,
 };
 
 static struct i2c_board_info msm_i2c_gsbi3_tdisc_info[] = {
 	{
-		I2C_BOARD_INFO("vtd518", TDISC_I2C_SLAVE_ADDR),
-		.irq =  TDISC_INT,
-		.platform_data = &tdisc_data,
-	},
+	 I2C_BOARD_INFO("vtd518", TDISC_I2C_SLAVE_ADDR),
+	 .irq = TDISC_INT,
+	 .platform_data = &tdisc_data,
+	 },
 };
 #endif
 
@@ -6753,7 +7600,7 @@ static unsigned int msm_timpani_setup_power(void)
 	}
 
 	/* The settings for LDO0 should be set such that
-	*  it doesn't require to reset the timpani. */
+	 *  it doesn't require to reset the timpani. */
 	rc = regulator_set_optimum_mode(vreg_timpani_1, 5000);
 	if (rc < 0) {
 		pr_err("Timpani regulator optimum mode setting failed\n");
@@ -6770,7 +7617,7 @@ static unsigned int msm_timpani_setup_power(void)
 	rc = gpio_request(GPIO_CDC_RST_N, "CDC_RST_N");
 	if (rc) {
 		pr_err("%s: GPIO Request %d failed\n", __func__,
-			GPIO_CDC_RST_N);
+		       GPIO_CDC_RST_N);
 		regulator_disable(vreg_timpani_1);
 		regulator_disable(vreg_timpani_2);
 		goto fail;
@@ -6819,7 +7666,7 @@ static int msm_timpani_codec_power(int vreg_on)
 
 		if (IS_ERR(vreg_timpani_cdc_apwr)) {
 			pr_err("%s: vreg_get failed (%ld)\n",
-			__func__, PTR_ERR(vreg_timpani_cdc_apwr));
+			       __func__, PTR_ERR(vreg_timpani_cdc_apwr));
 			rc = PTR_ERR(vreg_timpani_cdc_apwr);
 			return rc;
 		}
@@ -6828,10 +7675,10 @@ static int msm_timpani_codec_power(int vreg_on)
 	if (vreg_on) {
 
 		rc = regulator_set_voltage(vreg_timpani_cdc_apwr,
-				2200000, 2200000);
+					   2200000, 2200000);
 		if (rc) {
 			pr_err("%s: unable to set 8058_s4 voltage to 2.2 V\n",
-					__func__);
+			       __func__);
 			goto vreg_fail;
 		}
 
@@ -6843,8 +7690,7 @@ static int msm_timpani_codec_power(int vreg_on)
 	} else {
 		rc = regulator_disable(vreg_timpani_cdc_apwr);
 		if (rc) {
-			pr_err("%s: vreg_disable failed %d\n",
-			__func__, rc);
+			pr_err("%s: vreg_disable failed %d\n", __func__, rc);
 			goto vreg_fail;
 		}
 	}
@@ -6858,14 +7704,14 @@ vreg_fail:
 }
 
 static struct marimba_codec_platform_data timpani_codec_pdata = {
-	.marimba_codec_power =  msm_timpani_codec_power,
+	.marimba_codec_power = msm_timpani_codec_power,
 };
 
 #define TIMPANI_SLAVE_ID_CDC_ADDR		0X77
 #define TIMPANI_SLAVE_ID_QMEMBIST_ADDR		0X66
 
 static struct marimba_platform_data timpani_pdata = {
-	.slave_id[MARIMBA_SLAVE_ID_CDC]	= TIMPANI_SLAVE_ID_CDC_ADDR,
+	.slave_id[MARIMBA_SLAVE_ID_CDC] = TIMPANI_SLAVE_ID_CDC_ADDR,
 	.slave_id[MARIMBA_SLAVE_ID_QMEMBIST] = TIMPANI_SLAVE_ID_QMEMBIST_ADDR,
 	.marimba_setup = msm_timpani_setup_power,
 	.marimba_shutdown = msm_timpani_shutdown_power,
@@ -6877,9 +7723,9 @@ static struct marimba_platform_data timpani_pdata = {
 
 static struct i2c_board_info msm_i2c_gsbi7_timpani_info[] = {
 	{
-		I2C_BOARD_INFO("timpani", TIMPANI_I2C_SLAVE_ADDR),
-		.platform_data = &timpani_pdata,
-	},
+	 I2C_BOARD_INFO("timpani", TIMPANI_I2C_SLAVE_ADDR),
+	 .platform_data = &timpani_pdata,
+	 },
 };
 
 #ifdef CONFIG_SND_SOC_WM8903
@@ -6890,9 +7736,9 @@ static struct wm8903_platform_data wm8903_pdata = {
 #define WM8903_I2C_SLAVE_ADDR 0x34
 static struct i2c_board_info wm8903_codec_i2c_info[] = {
 	{
-		I2C_BOARD_INFO("wm8903", WM8903_I2C_SLAVE_ADDR >> 1),
-		.platform_data = &wm8903_pdata,
-	},
+	 I2C_BOARD_INFO("wm8903", WM8903_I2C_SLAVE_ADDR >> 1),
+	 .platform_data = &wm8903_pdata,
+	 },
 };
 #endif
 #ifdef CONFIG_PMIC8901
@@ -6903,10 +7749,11 @@ static struct i2c_board_info wm8903_codec_i2c_info[] = {
  *			 regulator name		consumer dev_name
  */
 static struct regulator_consumer_supply vreg_consumers_8901_USB_OTG[] = {
-	REGULATOR_SUPPLY("8901_usb_otg",	NULL),
+	REGULATOR_SUPPLY("8901_usb_otg", NULL),
 };
+
 static struct regulator_consumer_supply vreg_consumers_8901_HDMI_MVS[] = {
-	REGULATOR_SUPPLY("8901_hdmi_mvs",	NULL),
+	REGULATOR_SUPPLY("8901_hdmi_mvs", NULL),
 };
 
 #define PM8901_VREG_INIT(_id, _min_uV, _max_uV, _modes, _ops, _apply_uV, \
@@ -6939,49 +7786,48 @@ static struct pm8901_vreg_pdata pm8901_vreg_init[] = {
 };
 
 static struct pm8xxx_misc_platform_data pm8901_misc_pdata = {
-	.priority		= 1,
+	.priority = 1,
 };
 
 static struct pm8xxx_irq_platform_data pm8901_irq_pdata = {
-	.irq_base		= PM8901_IRQ_BASE,
-	.devirq			= MSM_GPIO_TO_INT(PM8901_GPIO_INT),
-	.irq_trigger_flag	= IRQF_TRIGGER_LOW,
+	.irq_base = PM8901_IRQ_BASE,
+	.devirq = MSM_GPIO_TO_INT(PM8901_GPIO_INT),
+	.irq_trigger_flag = IRQF_TRIGGER_LOW,
 };
 
 static struct pm8xxx_mpp_platform_data pm8901_mpp_pdata = {
-	.mpp_base		= PM8901_MPP_PM_TO_SYS(0),
+	.mpp_base = PM8901_MPP_PM_TO_SYS(0),
 };
 
 static struct pm8901_platform_data pm8901_platform_data = {
-	.irq_pdata		= &pm8901_irq_pdata,
-	.mpp_pdata		= &pm8901_mpp_pdata,
-	.regulator_pdatas	= pm8901_vreg_init,
-	.num_regulators		= ARRAY_SIZE(pm8901_vreg_init),
-	.misc_pdata		= &pm8901_misc_pdata,
+	.irq_pdata = &pm8901_irq_pdata,
+	.mpp_pdata = &pm8901_mpp_pdata,
+	.regulator_pdatas = pm8901_vreg_init,
+	.num_regulators = ARRAY_SIZE(pm8901_vreg_init),
+	.misc_pdata = &pm8901_misc_pdata,
 };
 
 static struct msm_ssbi_platform_data msm8x60_ssbi_pm8901_pdata __devinitdata = {
 	.controller_type = MSM_SBI_CTRL_PMIC_ARBITER,
-	.slave	= {
-		.name = "pm8901-core",
-		.platform_data = &pm8901_platform_data,
-	},
+	.slave = {
+		  .name = "pm8901-core",
+		  .platform_data = &pm8901_platform_data,
+		  },
 };
 #endif /* CONFIG_PMIC8901 */
 
-#if defined(CONFIG_MARIMBA_CORE) && (defined(CONFIG_GPIO_SX150X) \
-	|| defined(CONFIG_GPIO_SX150X_MODULE))
+#if defined(CONFIG_MARIMBA_CORE)
 
 static struct regulator *vreg_bahama;
 static int msm_bahama_sys_rst = GPIO_MS_SYS_RESET_N;
 
-struct bahama_config_register{
+struct bahama_config_register {
 	u8 reg;
 	u8 value;
 	u8 mask;
 };
 
-enum version{
+enum version {
 	VER_1_0,
 	VER_2_0,
 	VER_UNSUPPORTED = 0xFF
@@ -6990,27 +7836,25 @@ enum version{
 static u8 read_bahama_ver(void)
 {
 	int rc;
-	struct marimba config = { .mod_id = SLAVE_ID_BAHAMA };
+	struct marimba config = {.mod_id = SLAVE_ID_BAHAMA };
 	u8 bahama_version;
 
-	rc = marimba_read_bit_mask(&config, 0x00,  &bahama_version, 1, 0x1F);
+	rc = marimba_read_bit_mask(&config, 0x00, &bahama_version, 1, 0x1F);
 	if (rc < 0) {
-		printk(KERN_ERR
-			 "%s: version read failed: %d\n",
-			__func__, rc);
-			return VER_UNSUPPORTED;
+		printk(KERN_ERR "%s: version read failed: %d\n", __func__, rc);
+		return VER_UNSUPPORTED;
 	} else {
 		printk(KERN_INFO
-		"%s: version read got: 0x%x\n",
-		__func__, bahama_version);
+		       "%s: version read got: 0x%x\n",
+		       __func__, bahama_version);
 	}
 
 	switch (bahama_version) {
-	case 0x08: /* varient of bahama v1 */
+	case 0x08:		/* varient of bahama v1 */
 	case 0x10:
 	case 0x00:
 		return VER_1_0;
-	case 0x09: /* variant of bahama v2 */
+	case 0x09:		/* variant of bahama v2 */
 		return VER_2_0;
 	default:
 		return VER_UNSUPPORTED;
@@ -7031,28 +7875,28 @@ static unsigned int msm_bahama_setup_power(void)
 	if (IS_ERR(vreg_bahama)) {
 		rc = PTR_ERR(vreg_bahama);
 		pr_err("%s: regulator_get %s = %d\n", __func__,
-			msm_bahama_regulator, rc);
+		       msm_bahama_regulator, rc);
 		return rc;
 	}
 
 	rc = regulator_set_voltage(vreg_bahama, 1800000, 1800000);
 	if (rc) {
 		pr_err("%s: regulator_set_voltage %s = %d\n", __func__,
-			msm_bahama_regulator, rc);
+		       msm_bahama_regulator, rc);
 		goto unget;
 	}
 
 	rc = regulator_enable(vreg_bahama);
 	if (rc) {
 		pr_err("%s: regulator_enable %s = %d\n", __func__,
-			msm_bahama_regulator, rc);
+		       msm_bahama_regulator, rc);
 		goto unget;
 	}
 
 	rc = gpio_request(msm_bahama_sys_rst, "bahama sys_rst_n");
 	if (rc) {
 		pr_err("%s: gpio_request %d = %d\n", __func__,
-			msm_bahama_sys_rst, rc);
+		       msm_bahama_sys_rst, rc);
 		goto unenable;
 	}
 
@@ -7090,32 +7934,33 @@ static unsigned int msm_bahama_core_config(int type)
 	if (type == BAHAMA_ID) {
 
 		int i;
-		struct marimba config = { .mod_id = SLAVE_ID_BAHAMA };
+		struct marimba config = {.mod_id = SLAVE_ID_BAHAMA };
 
 		const struct bahama_config_register v20_init[] = {
 			/* reg, value, mask */
-			{ 0xF4, 0x84, 0xFF }, /* AREG */
-			{ 0xF0, 0x04, 0xFF } /* DREG */
+			{0xF4, 0x84, 0xFF},	/* AREG */
+			{0xF0, 0x04, 0xFF}	/* DREG */
 		};
 
 		if (read_bahama_ver() == VER_2_0) {
 			for (i = 0; i < ARRAY_SIZE(v20_init); i++) {
 				u8 value = v20_init[i].value;
 				rc = marimba_write_bit_mask(&config,
-					v20_init[i].reg,
-					&value,
-					sizeof(v20_init[i].value),
-					v20_init[i].mask);
+							    v20_init[i].reg,
+							    &value,
+							    sizeof(v20_init[i].
+								   value),
+							    v20_init[i].mask);
 				if (rc < 0) {
 					printk(KERN_ERR
-						"%s: reg %d write failed: %d\n",
-						__func__, v20_init[i].reg, rc);
+					       "%s: reg %d write failed: %d\n",
+					       __func__, v20_init[i].reg, rc);
 					return rc;
 				}
 				printk(KERN_INFO "%s: reg 0x%02x value 0x%02x"
-					" mask 0x%02x\n",
-					__func__, v20_init[i].reg,
-					v20_init[i].value, v20_init[i].mask);
+				       " mask 0x%02x\n",
+				       __func__, v20_init[i].reg,
+				       v20_init[i].value, v20_init[i].mask);
 			}
 		}
 	}
@@ -7131,72 +7976,71 @@ static int fm_radio_setup(struct marimba_fm_platform_data *pdata)
 {
 	int rc = 0;
 	struct pm_gpio cfg = {
-				.direction      = PM_GPIO_DIR_IN,
-				.pull           = PM_GPIO_PULL_NO,
-				.vin_sel        = PM8058_GPIO_VIN_S3,
-				.function       = PM_GPIO_FUNC_NORMAL,
-				.inv_int_pol    = 0,
-				};
+		.direction = PM_GPIO_DIR_IN,
+		.pull = PM_GPIO_PULL_NO,
+		.vin_sel = PM8058_GPIO_VIN_S3,
+		.function = PM_GPIO_FUNC_NORMAL,
+		.inv_int_pol = 0,
+	};
 
 	if (!fm_regulator_s3) {
 		fm_regulator_s3 = regulator_get(NULL, "8058_s3");
 		if (IS_ERR(fm_regulator_s3)) {
 			rc = PTR_ERR(fm_regulator_s3);
 			printk(KERN_ERR "%s: regulator get s3 (%d)\n",
-				__func__, rc);
+			       __func__, rc);
 			goto out;
-			}
+		}
 	}
-
 
 	rc = regulator_set_voltage(fm_regulator_s3, 1800000, 1800000);
 	if (rc < 0) {
 		printk(KERN_ERR "%s: regulator set voltage failed (%d)\n",
-				__func__, rc);
+		       __func__, rc);
 		goto fm_fail_put;
 	}
 
 	rc = regulator_enable(fm_regulator_s3);
 	if (rc < 0) {
 		printk(KERN_ERR "%s: regulator s3 enable failed (%d)\n",
-					__func__, rc);
+		       __func__, rc);
 		goto fm_fail_put;
 	}
 
-	/*Vote for XO clock*/
+	/*Vote for XO clock */
 	fm_clock = msm_xo_get(MSM_XO_TCXO_D0, "fm_power");
 
 	if (IS_ERR(fm_clock)) {
 		rc = PTR_ERR(fm_clock);
 		printk(KERN_ERR "%s: Couldn't get TCXO_D0 vote for FM (%d)\n",
-					__func__, rc);
+		       __func__, rc);
 		goto fm_fail_switch;
 	}
 
 	rc = msm_xo_mode_vote(fm_clock, MSM_XO_MODE_ON);
 	if (rc < 0) {
 		printk(KERN_ERR "%s:  Failed to vote for TCX0_D0 ON (%d)\n",
-					__func__, rc);
+		       __func__, rc);
 		goto fm_fail_vote;
 	}
 
-	/*GPIO 18 on PMIC is FM_IRQ*/
+	/*GPIO 18 on PMIC is FM_IRQ */
 	rc = pm8xxx_gpio_config(PM8058_GPIO_PM_TO_SYS(FM_GPIO), &cfg);
 	if (rc) {
 		printk(KERN_ERR "%s: return val of pm8xxx_gpio_config: %d\n",
-						__func__,  rc);
+		       __func__, rc);
 		goto fm_fail_clock;
 	}
 	goto out;
 
 fm_fail_clock:
-		msm_xo_mode_vote(fm_clock, MSM_XO_MODE_OFF);
+	msm_xo_mode_vote(fm_clock, MSM_XO_MODE_OFF);
 fm_fail_vote:
-		msm_xo_put(fm_clock);
+	msm_xo_put(fm_clock);
 fm_fail_switch:
-		regulator_disable(fm_regulator_s3);
+	regulator_disable(fm_regulator_s3);
 fm_fail_put:
-		regulator_put(fm_regulator_s3);
+	regulator_put(fm_regulator_s3);
 out:
 	return rc;
 };
@@ -7208,7 +8052,7 @@ static void fm_radio_shutdown(struct marimba_fm_platform_data *pdata)
 		rc = regulator_disable(fm_regulator_s3);
 		if (rc < 0) {
 			printk(KERN_ERR "%s: regulator s3 disable (%d)\n",
-							__func__, rc);
+			       __func__, rc);
 		}
 		regulator_put(fm_regulator_s3);
 		fm_regulator_s3 = NULL;
@@ -7219,7 +8063,7 @@ static void fm_radio_shutdown(struct marimba_fm_platform_data *pdata)
 		rc = msm_xo_mode_vote(fm_clock, MSM_XO_MODE_OFF);
 		if (rc < 0) {
 			printk(KERN_ERR "%s: Voting off XO clock (%d)\n",
-					__func__, rc);
+			       __func__, rc);
 		}
 		msm_xo_put(fm_clock);
 	}
@@ -7234,7 +8078,7 @@ static void fm_radio_shutdown(struct marimba_fm_platform_data *pdata)
 #define BAHAMA_SLAVE_ID_QMEMBIST_ADDR   0x7B
 
 static struct marimba_fm_platform_data marimba_fm_pdata = {
-	.fm_setup =  fm_radio_setup,
+	.fm_setup = fm_radio_setup,
 	.fm_shutdown = fm_radio_shutdown,
 	.irq = PM8058_GPIO_IRQ(PM8058_IRQ_BASE, FM_GPIO),
 	.is_fm_soc_i2s_master = false,
@@ -7245,8 +8089,8 @@ static struct marimba_fm_platform_data marimba_fm_pdata = {
 Just initializing the BAHAMA related slave
 */
 static struct marimba_platform_data marimba_pdata = {
-	.slave_id[SLAVE_ID_BAHAMA_FM]        = BAHAMA_SLAVE_ID_FM_ADDR,
-	.slave_id[SLAVE_ID_BAHAMA_QMEMBIST]  = BAHAMA_SLAVE_ID_QMEMBIST_ADDR,
+	.slave_id[SLAVE_ID_BAHAMA_FM] = BAHAMA_SLAVE_ID_FM_ADDR,
+	.slave_id[SLAVE_ID_BAHAMA_QMEMBIST] = BAHAMA_SLAVE_ID_QMEMBIST_ADDR,
 	.bahama_setup = msm_bahama_setup_power,
 	.bahama_shutdown = msm_bahama_shutdown_power,
 	.bahama_core_config = msm_bahama_core_config,
@@ -7254,12 +8098,11 @@ static struct marimba_platform_data marimba_pdata = {
 	.tsadc_ssbi_adap = MARIMBA_SSBI_ADAP,
 };
 
-
 static struct i2c_board_info msm_marimba_board_info[] = {
 	{
-		I2C_BOARD_INFO("marimba", 0xc),
-		.platform_data = &marimba_pdata,
-	}
+	 I2C_BOARD_INFO("marimba", 0xc),
+	 .platform_data = &marimba_pdata,
+	 }
 };
 #endif /* CONFIG_MAIMBA_CORE */
 
@@ -7272,158 +8115,262 @@ static struct i2c_board_info msm_marimba_board_info[] = {
 #define I2C_DRAGON (1 << 5)
 
 struct i2c_registry {
-	u8                     machs;
-	int                    bus;
+	u8 machs;
+	int bus;
 	struct i2c_board_info *info;
-	int                    len;
+	int len;
 };
 
 static struct i2c_registry msm8x60_i2c_devices[] __initdata = {
 #if defined(CONFIG_GPIO_SX150X) || defined(CONFIG_GPIO_SX150X_MODULE)
 	{
-		I2C_SURF | I2C_FFA | I2C_DRAGON,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		core_expander_i2c_info,
-		ARRAY_SIZE(core_expander_i2c_info),
-	},
+	 I2C_SURF | I2C_FFA | I2C_DRAGON,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 core_expander_i2c_info,
+	 ARRAY_SIZE(core_expander_i2c_info),
+	 },
 	{
-		I2C_SURF | I2C_FFA | I2C_DRAGON,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		docking_expander_i2c_info,
-		ARRAY_SIZE(docking_expander_i2c_info),
-	},
+	 I2C_SURF | I2C_FFA | I2C_DRAGON,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 docking_expander_i2c_info,
+	 ARRAY_SIZE(docking_expander_i2c_info),
+	 },
 	{
-		I2C_SURF,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		surf_expanders_i2c_info,
-		ARRAY_SIZE(surf_expanders_i2c_info),
-	},
+	 I2C_SURF,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 surf_expanders_i2c_info,
+	 ARRAY_SIZE(surf_expanders_i2c_info),
+	 },
 	{
-		I2C_SURF | I2C_FFA | I2C_DRAGON,
-		MSM_GSBI3_QUP_I2C_BUS_ID,
-		fha_expanders_i2c_info,
-		ARRAY_SIZE(fha_expanders_i2c_info),
-	},
+	 I2C_SURF | I2C_FFA | I2C_DRAGON,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 fha_expanders_i2c_info,
+	 ARRAY_SIZE(fha_expanders_i2c_info),
+	 },
 	{
-		I2C_FLUID,
-		MSM_GSBI3_QUP_I2C_BUS_ID,
-		fluid_expanders_i2c_info,
-		ARRAY_SIZE(fluid_expanders_i2c_info),
-	},
+	 I2C_FLUID,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 fluid_expanders_i2c_info,
+	 ARRAY_SIZE(fluid_expanders_i2c_info),
+	 },
 	{
-		I2C_FLUID,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		fluid_core_expander_i2c_info,
-		ARRAY_SIZE(fluid_core_expander_i2c_info),
-	},
+	 I2C_FLUID,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 fluid_core_expander_i2c_info,
+	 ARRAY_SIZE(fluid_core_expander_i2c_info),
+	 },
 #endif
 #if defined(CONFIG_TOUCHDISC_VTD518_SHINETSU) || \
 		defined(CONFIG_TOUCHDISC_VTD518_SHINETSU_MODULE)
 	{
-		I2C_SURF | I2C_FFA | I2C_FLUID | I2C_DRAGON,
-		MSM_GSBI3_QUP_I2C_BUS_ID,
-		msm_i2c_gsbi3_tdisc_info,
-		ARRAY_SIZE(msm_i2c_gsbi3_tdisc_info),
-	},
+	 I2C_SURF | I2C_FFA | I2C_FLUID | I2C_DRAGON,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 msm_i2c_gsbi3_tdisc_info,
+	 ARRAY_SIZE(msm_i2c_gsbi3_tdisc_info),
+	 },
 #endif
+#if defined(CONFIG_TOUCHSCREEN_CY8C_TS)
 	{
-		I2C_SURF | I2C_FFA | I2C_FLUID,
-		MSM_GSBI3_QUP_I2C_BUS_ID,
-		cy8ctmg200_board_info,
-		ARRAY_SIZE(cy8ctmg200_board_info),
-	},
+	 I2C_SURF | I2C_FFA | I2C_FLUID,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 cy8ctmg200_board_info,
+	 ARRAY_SIZE(cy8ctmg200_board_info),
+	 },
 	{
-		I2C_DRAGON,
-		MSM_GSBI3_QUP_I2C_BUS_ID,
-		cy8ctma340_dragon_board_info,
-		ARRAY_SIZE(cy8ctma340_dragon_board_info),
-	},
+	 I2C_DRAGON,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 cy8ctma340_dragon_board_info,
+	 ARRAY_SIZE(cy8ctma340_dragon_board_info),
+	 },
+#endif
 #if defined(CONFIG_TOUCHSCREEN_CYTTSP_I2C_QC) || \
 		defined(CONFIG_TOUCHSCREEN_CYTTSP_I2C_QC_MODULE)
 	{
-		I2C_FLUID,
-		MSM_GSBI3_QUP_I2C_BUS_ID,
-		cyttsp_fluid_info,
-		ARRAY_SIZE(cyttsp_fluid_info),
-	},
+	 I2C_FLUID,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 cyttsp_fluid_info,
+	 ARRAY_SIZE(cyttsp_fluid_info),
+	 },
 	{
-		I2C_FFA | I2C_SURF,
-		MSM_GSBI3_QUP_I2C_BUS_ID,
-		cyttsp_ffa_info,
-		ARRAY_SIZE(cyttsp_ffa_info),
-	},
+	 I2C_FFA | I2C_SURF,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 cyttsp_ffa_info,
+	 ARRAY_SIZE(cyttsp_ffa_info),
+	 },
+#endif
+#if defined(CONFIG_TOUCHSCREEN_ATMEL_MXT)
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 atmel_mxt_i2c_info,
+	 ARRAY_SIZE(atmel_mxt_i2c_info),
+	 },
+#endif
+#if defined(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4)
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 synaptics_i2c_info,
+	 ARRAY_SIZE(synaptics_i2c_info),
+	 },
+#endif
+#if defined(CONFIG_RMI4_I2C)
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 rmi_i2c_info,
+	 ARRAY_SIZE(rmi_i2c_info),
+	 },
+#endif
+#if defined(CONFIG_TOUCHSCREEN_FT5X0X_I2C)
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 ft5x0x_i2c_info,
+	 ARRAY_SIZE(ft5x0x_i2c_info),
+	 },
 #endif
 #ifdef CONFIG_MSM_CAMERA
 #ifndef CONFIG_MSM_CAMERA_V4L2
 	{
-		I2C_SURF | I2C_FFA | I2C_FLUID ,
-		MSM_GSBI4_QUP_I2C_BUS_ID,
-		msm_camera_boardinfo,
-		ARRAY_SIZE(msm_camera_boardinfo),
-	},
+	 I2C_SURF | I2C_FFA | I2C_FLUID,
+	 MSM_GSBI4_QUP_I2C_BUS_ID,
+	 msm_camera_boardinfo,
+	 ARRAY_SIZE(msm_camera_boardinfo),
+	 },
 	{
-		I2C_DRAGON,
-		MSM_GSBI4_QUP_I2C_BUS_ID,
-		msm_camera_dragon_boardinfo,
-		ARRAY_SIZE(msm_camera_dragon_boardinfo),
-	},
+	 I2C_DRAGON,
+	 MSM_GSBI4_QUP_I2C_BUS_ID,
+	 msm_camera_dragon_boardinfo,
+	 ARRAY_SIZE(msm_camera_dragon_boardinfo),
+	 },
 #endif
 #endif
+#ifdef CONFIG_LEDS_LM3554
 	{
-		I2C_SURF | I2C_FFA | I2C_FLUID,
-		MSM_GSBI7_QUP_I2C_BUS_ID,
-		msm_i2c_gsbi7_timpani_info,
-		ARRAY_SIZE(msm_i2c_gsbi7_timpani_info),
-	},
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 lm3554_i2c_info,
+	 ARRAY_SIZE(lm3554_i2c_info),
+	 },
+#endif
+	{
+	 I2C_SURF | I2C_FFA | I2C_FLUID,
+	 MSM_GSBI7_QUP_I2C_BUS_ID,
+	 msm_i2c_gsbi7_timpani_info,
+	 ARRAY_SIZE(msm_i2c_gsbi7_timpani_info),
+	 },
 #if defined(CONFIG_MARIMBA_CORE)
 	{
-		I2C_SURF | I2C_FFA | I2C_FLUID | I2C_DRAGON,
-		MSM_GSBI7_QUP_I2C_BUS_ID,
-		msm_marimba_board_info,
-		ARRAY_SIZE(msm_marimba_board_info),
-	},
+	 I2C_SURF | I2C_FFA | I2C_FLUID | I2C_DRAGON,
+	 MSM_GSBI7_QUP_I2C_BUS_ID,
+	 msm_marimba_board_info,
+	 ARRAY_SIZE(msm_marimba_board_info),
+	 },
 #endif /* CONFIG_MARIMBA_CORE */
 #ifdef CONFIG_ISL9519_CHARGER
 	{
-		I2C_SURF | I2C_FFA,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		isl_charger_i2c_info,
-		ARRAY_SIZE(isl_charger_i2c_info),
-	},
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 isl_charger_i2c_info,
+	 ARRAY_SIZE(isl_charger_i2c_info),
+	 },
 #endif
 #if defined(CONFIG_HAPTIC_ISA1200) || \
 		defined(CONFIG_HAPTIC_ISA1200_MODULE)
 	{
-		I2C_FLUID,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		msm_isa1200_board_info,
-		ARRAY_SIZE(msm_isa1200_board_info),
-	},
+	 I2C_FLUID | I2C_SURF | I2C_FFA,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 msm_isa1200_board_info,
+	 ARRAY_SIZE(msm_isa1200_board_info),
+	 },
 #endif
 #if defined(CONFIG_SMB137B_CHARGER) || defined(CONFIG_SMB137B_CHARGER_MODULE)
 	{
-		I2C_FLUID,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		smb137b_charger_i2c_info,
-		ARRAY_SIZE(smb137b_charger_i2c_info),
-	},
+	 I2C_FLUID,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 smb137b_charger_i2c_info,
+	 ARRAY_SIZE(smb137b_charger_i2c_info),
+	 },
 #endif
 #if defined(CONFIG_BATTERY_BQ27520) || \
 		defined(CONFIG_BATTERY_BQ27520_MODULE)
 	{
-		I2C_FLUID,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		msm_bq27520_board_info,
-		ARRAY_SIZE(msm_bq27520_board_info),
-	},
+	 I2C_FLUID,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 msm_bq27520_board_info,
+	 ARRAY_SIZE(msm_bq27520_board_info),
+	 },
 #endif
 #if defined(CONFIG_SND_SOC_WM8903) || defined(CONFIG_SND_SOC_WM8903_MODULE)
 	{
-		I2C_DRAGON,
-		MSM_GSBI8_QUP_I2C_BUS_ID,
-		wm8903_codec_i2c_info,
-		ARRAY_SIZE(wm8903_codec_i2c_info),
-	},
+	 I2C_DRAGON,
+	 MSM_GSBI8_QUP_I2C_BUS_ID,
+	 wm8903_codec_i2c_info,
+	 ARRAY_SIZE(wm8903_codec_i2c_info),
+	 },
+#endif
+#if defined(CONFIG_LEDS_LM3530)
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 lm3530_i2c_info,
+	 ARRAY_SIZE(lm3530_i2c_info),
+	 },
+#endif
+#ifdef CONFIG_SENSORS_HMC5883L
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI12_QUP_I2C_BUS_ID,
+	 hmc5883l_i2c_info,
+	 ARRAY_SIZE(hmc5883l_i2c_info),
+	 },
+#endif
+#ifdef CONFIG_SENSORS_ISL29028
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 isl29028_i2c_info_1,
+	 ARRAY_SIZE(isl29028_i2c_info_1),
+	 },
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI3_QUP_I2C_BUS_ID,
+	 isl29028_i2c_info_2,
+	 ARRAY_SIZE(isl29028_i2c_info_2),
+	 },
+#endif
+#ifdef CONFIG_SENSORS_LIS3DH
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI12_QUP_I2C_BUS_ID,
+	 lis3dh_i2c_info,
+	 ARRAY_SIZE(lis3dh_i2c_info),
+	 },
+#endif
+#ifdef CONFIG_SENSORS_LSM303D
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI12_QUP_I2C_BUS_ID,
+	 lsm303d_i2c_info,
+	 ARRAY_SIZE(lsm303d_i2c_info),
+	 },
+#endif
+#ifdef CONFIG_SENSORS_BMC055
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI12_QUP_I2C_BUS_ID,
+	 bmc055_i2c_info,
+	 ARRAY_SIZE(bmc055_i2c_info),
+	 },
+#endif
+#ifdef CONFIG_BATTERY_MAX17043
+	{
+	 I2C_SURF | I2C_FFA,
+	 MSM_GSBI12_QUP_I2C_BUS_ID,
+	 max17043_battery_i2c_info,
+	 ARRAY_SIZE(max17043_battery_i2c_info),
+	 },
 #endif
 };
 #endif /* CONFIG_I2C */
@@ -7434,14 +8381,14 @@ static void __init fixup_i2c_configs(void)
 #if defined(CONFIG_GPIO_SX150X) || defined(CONFIG_GPIO_SX150X_MODULE)
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_fusion())
 		sx150x_data[SX150X_CORE].irq_summary =
-			PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT2_N);
+		    PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT2_N);
 	else if (machine_is_msm8x60_ffa() || machine_is_msm8x60_fusn_ffa() ||
-		machine_is_msm8x60_dragon())
+		 machine_is_msm8x60_dragon() || machine_is_mione())
 		sx150x_data[SX150X_CORE].irq_summary =
-			PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT1_N);
+		    PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT1_N);
 	else if (machine_is_msm8x60_fluid())
 		sx150x_data[SX150X_CORE_FLUID].irq_summary =
-			PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT1_N);
+		    PM8058_GPIO_IRQ(PM8058_IRQ_BASE, UI_INT1_N);
 #endif
 #endif
 }
@@ -7463,7 +8410,8 @@ static void __init register_i2c_devices(void)
 	/* Build the matching 'supported_machs' bitmask */
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_fusion())
 		mach_mask = I2C_SURF;
-	else if (machine_is_msm8x60_ffa() || machine_is_msm8x60_fusn_ffa())
+	else if (machine_is_msm8x60_ffa() || machine_is_msm8x60_fusn_ffa()
+		 || machine_is_mione())
 		mach_mask = I2C_FFA;
 	else if (machine_is_msm8x60_rumi3())
 		mach_mask = I2C_RUMI;
@@ -7486,8 +8434,8 @@ static void __init register_i2c_devices(void)
 #ifdef CONFIG_MSM_CAMERA_V4L2
 	if (msm8x60_camera_i2c_devices.machs & mach_mask)
 		i2c_register_board_info(msm8x60_camera_i2c_devices.bus,
-			msm8x60_camera_i2c_devices.info,
-			msm8x60_camera_i2c_devices.len);
+					msm8x60_camera_i2c_devices.info,
+					msm8x60_camera_i2c_devices.len);
 #endif
 #endif
 }
@@ -7552,10 +8500,8 @@ static void __init msm8x60_init_buses(void)
 #endif
 
 #ifdef CONFIG_MSM_SSBI
-	msm_device_ssbi_pmic1.dev.platform_data =
-				&msm8x60_ssbi_pm8058_pdata;
-	msm_device_ssbi_pmic2.dev.platform_data =
-				&msm8x60_ssbi_pm8901_pdata;
+	msm_device_ssbi_pmic1.dev.platform_data = &msm8x60_ssbi_pm8058_pdata;
+	msm_device_ssbi_pmic2.dev.platform_data = &msm8x60_ssbi_pm8901_pdata;
 #endif
 
 	if (machine_is_msm8x60_fluid()) {
@@ -7566,10 +8512,9 @@ static void __init msm8x60_init_buses(void)
 #endif
 #if defined(CONFIG_SPI_QUP) || defined(CONFIG_SPI_QUP_MODULE)
 		msm_gsbi10_qup_spi_device.dev.platform_data =
-					&msm_gsbi10_qup_spi_pdata;
+		    &msm_gsbi10_qup_spi_pdata;
 #endif
 	}
-
 #if defined(CONFIG_USB_MSM_72K) || defined(CONFIG_USB_EHCI_HCD)
 	/*
 	 * We can not put USB regulators (8058_l6 and 8058_l7) in LPM
@@ -7578,9 +8523,9 @@ static void __init msm8x60_init_buses(void)
 	 * with a hardware workaround.
 	 */
 	if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 2 &&
-			(machine_is_msm8x60_surf() ||
-			(machine_is_msm8x60_ffa() &&
-			pmic_id_notif_supported)))
+	    (machine_is_msm8x60_surf() ||
+	     ((machine_is_msm8x60_ffa() || machine_is_mione()) &&
+	      pmic_id_notif_supported)))
 		msm_otg_pdata.phy_can_powercollapse = 1;
 	msm_device_otg.dev.platform_data = &msm_otg_pdata;
 #endif
@@ -7590,7 +8535,8 @@ static void __init msm8x60_init_buses(void)
 #endif
 
 #ifdef CONFIG_SERIAL_MSM_HS
-	msm_uart_dm1_pdata.wakeup_irq = gpio_to_irq(54); /* GSBI6(2) */
+	msm_uart_dm1_pdata.wakeup_irq = 0;
+	/* = gpio_to_irq(54); GSBI6(2) */
 	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
 #endif
 #ifdef CONFIG_MSM_GSBI9_UART
@@ -7598,7 +8544,7 @@ static void __init msm8x60_init_buses(void)
 		msm_device_uart_gsbi9 = msm_add_gsbi9_uart();
 		if (IS_ERR(msm_device_uart_gsbi9))
 			pr_err("%s(): Failed to create uart gsbi9 device\n",
-								__func__);
+			       __func__);
 	}
 #endif
 
@@ -7641,7 +8587,7 @@ static void __init msm8x60_init_ebi2(void)
 
 	if (IS_ERR(mem_clk)) {
 		pr_err("%s: clk_get_sys(%s,%s), failed", __func__,
-					"msm_ebi2", "mem_clk");
+		       "msm_ebi2", "mem_clk");
 		return;
 	}
 	clk_prepare_enable(mem_clk);
@@ -7652,20 +8598,21 @@ static void __init msm8x60_init_ebi2(void)
 		ebi2_cfg = readl_relaxed(ebi2_cfg_ptr);
 
 		if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() ||
-			machine_is_msm8x60_fluid() ||
-			machine_is_msm8x60_dragon())
-			ebi2_cfg |= (1 << 4) | (1 << 5); /* CS2, CS3 */
+		    machine_is_msm8x60_fluid() ||
+		    machine_is_mione() || machine_is_msm8x60_dragon())
+			ebi2_cfg |= (1 << 4) | (1 << 5);	/* CS2, CS3 */
 		else if (machine_is_msm8x60_sim())
-			ebi2_cfg |= (1 << 4); /* CS2 */
+			ebi2_cfg |= (1 << 4);	/* CS2 */
 		else if (machine_is_msm8x60_rumi3())
-			ebi2_cfg |= (1 << 5); /* CS3 */
+			ebi2_cfg |= (1 << 5);	/* CS3 */
 
 		writel_relaxed(ebi2_cfg, ebi2_cfg_ptr);
 		iounmap(ebi2_cfg_ptr);
 	}
 
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() ||
-	    machine_is_msm8x60_fluid() || machine_is_msm8x60_dragon()) {
+	    machine_is_msm8x60_fluid() || machine_is_msm8x60_dragon() ||
+	    machine_is_mione()) {
 		ebi2_cfg_ptr = ioremap_nocache(0x1a110000, SZ_4K);
 		if (ebi2_cfg_ptr != 0) {
 			/* EBI2_XMEM_CFG:PWRSAVE_MODE off */
@@ -7690,7 +8637,7 @@ static void __init msm8x60_init_ebi2(void)
 			writel_relaxed(0x01000020, ebi2_cfg_ptr + 0x34);
 #else
 			/* EBI2 CS3 muxed address/data,
-			* two cyc addr enable */
+			 * two cyc addr enable */
 			writel_relaxed(0xA3030020, ebi2_cfg_ptr + 0x34);
 
 #endif
@@ -7704,18 +8651,18 @@ static void __init msm8x60_configure_smc91x(void)
 	if (machine_is_msm8x60_sim()) {
 
 		smc91x_resources[0].start = 0x1b800300;
-		smc91x_resources[0].end   = 0x1b8003ff;
+		smc91x_resources[0].end = 0x1b8003ff;
 
 		smc91x_resources[1].start = (NR_MSM_IRQS + 40);
-		smc91x_resources[1].end   = (NR_MSM_IRQS + 40);
+		smc91x_resources[1].end = (NR_MSM_IRQS + 40);
 
 	} else if (machine_is_msm8x60_rumi3()) {
 
 		smc91x_resources[0].start = 0x1d000300;
-		smc91x_resources[0].end   = 0x1d0003ff;
+		smc91x_resources[0].end = 0x1d0003ff;
 
 		smc91x_resources[1].start = TLMM_MSM_DIR_CONN_IRQ_0;
-		smc91x_resources[1].end   = TLMM_MSM_DIR_CONN_IRQ_0;
+		smc91x_resources[1].end = TLMM_MSM_DIR_CONN_IRQ_0;
 	}
 }
 
@@ -7864,50 +8811,46 @@ struct msm_sdcc_pin_cfg {
 	u8 sdio_lpm_gpio_cfg;
 };
 
-
 static struct msm_sdcc_pin_cfg sdcc_pin_cfg_data[MAX_SDCC_CONTROLLER] = {
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
 	[0] = {
-		.is_gpio = 1,
-		.gpio_data_size = ARRAY_SIZE(sdc1_gpio_cfg),
-		.gpio_data = sdc1_gpio_cfg
-	},
+	       .is_gpio = 1,
+	       .gpio_data_size = ARRAY_SIZE(sdc1_gpio_cfg),
+	       .gpio_data = sdc1_gpio_cfg},
 #endif
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
 	[1] = {
-		.is_gpio = 1,
-		.gpio_data_size = ARRAY_SIZE(sdc2_gpio_cfg),
-		.gpio_data = sdc2_gpio_cfg
-	},
+	       .is_gpio = 1,
+	       .gpio_data_size = ARRAY_SIZE(sdc2_gpio_cfg),
+	       .gpio_data = sdc2_gpio_cfg},
 #endif
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
 	[2] = {
-		.is_gpio = 0,
-		.pad_drv_on_data = sdc3_pad_on_drv_cfg,
-		.pad_drv_off_data = sdc3_pad_off_drv_cfg,
-		.pad_pull_on_data = sdc3_pad_on_pull_cfg,
-		.pad_pull_off_data = sdc3_pad_off_pull_cfg,
-		.pad_drv_data_size = ARRAY_SIZE(sdc3_pad_on_drv_cfg),
-		.pad_pull_data_size = ARRAY_SIZE(sdc3_pad_on_pull_cfg)
-	},
+	       .is_gpio = 0,
+	       .pad_drv_on_data = sdc3_pad_on_drv_cfg,
+	       .pad_drv_off_data = sdc3_pad_off_drv_cfg,
+	       .pad_pull_on_data = sdc3_pad_on_pull_cfg,
+	       .pad_pull_off_data = sdc3_pad_off_pull_cfg,
+	       .pad_drv_data_size = ARRAY_SIZE(sdc3_pad_on_drv_cfg),
+	       .pad_pull_data_size = ARRAY_SIZE(sdc3_pad_on_pull_cfg)
+	       },
 #endif
 #ifdef CONFIG_MMC_MSM_SDC4_SUPPORT
 	[3] = {
-		.is_gpio = 0,
-		.pad_drv_on_data = sdc4_pad_on_drv_cfg,
-		.pad_drv_off_data = sdc4_pad_off_drv_cfg,
-		.pad_pull_on_data = sdc4_pad_on_pull_cfg,
-		.pad_pull_off_data = sdc4_pad_off_pull_cfg,
-		.pad_drv_data_size = ARRAY_SIZE(sdc4_pad_on_drv_cfg),
-		.pad_pull_data_size = ARRAY_SIZE(sdc4_pad_on_pull_cfg)
-	},
+	       .is_gpio = 0,
+	       .pad_drv_on_data = sdc4_pad_on_drv_cfg,
+	       .pad_drv_off_data = sdc4_pad_off_drv_cfg,
+	       .pad_pull_on_data = sdc4_pad_on_pull_cfg,
+	       .pad_pull_off_data = sdc4_pad_off_pull_cfg,
+	       .pad_drv_data_size = ARRAY_SIZE(sdc4_pad_on_drv_cfg),
+	       .pad_pull_data_size = ARRAY_SIZE(sdc4_pad_on_pull_cfg)
+	       },
 #endif
 #ifdef CONFIG_MMC_MSM_SDC5_SUPPORT
 	[4] = {
-		.is_gpio = 1,
-		.gpio_data_size = ARRAY_SIZE(sdc5_gpio_cfg),
-		.gpio_data = sdc5_gpio_cfg
-	}
+	       .is_gpio = 1,
+	       .gpio_data_size = ARRAY_SIZE(sdc5_gpio_cfg),
+	       .gpio_data = sdc5_gpio_cfg}
 #endif
 };
 
@@ -7925,26 +8868,25 @@ static int msm_sdcc_setup_gpio(int dev_id, unsigned int enable)
 		if (enable) {
 
 			if (curr->gpio_data[n].always_on &&
-				curr->gpio_data[n].is_enabled)
+			    curr->gpio_data[n].is_enabled)
 				continue;
 			pr_debug("%s: enable: %s\n", __func__,
-					curr->gpio_data[n].name);
+				 curr->gpio_data[n].name);
 			rc = gpio_request(curr->gpio_data[n].no,
-				curr->gpio_data[n].name);
+					  curr->gpio_data[n].name);
 			if (rc) {
 				pr_err("%s: gpio_request(%d, %s)"
-					"failed", __func__,
-					curr->gpio_data[n].no,
-					curr->gpio_data[n].name);
+				       "failed", __func__,
+				       curr->gpio_data[n].no,
+				       curr->gpio_data[n].name);
 				goto free_gpios;
 			}
 			/* set direction as output for all GPIOs */
-			rc = gpio_direction_output(
-				curr->gpio_data[n].no, 1);
+			rc = gpio_direction_output(curr->gpio_data[n].no, 1);
 			if (rc) {
 				pr_err("%s: gpio_direction_output"
-					"(%d, 1) failed\n", __func__,
-					curr->gpio_data[n].no);
+				       "(%d, 1) failed\n", __func__,
+				       curr->gpio_data[n].no);
 				goto free_gpios;
 			}
 			curr->gpio_data[n].is_enabled = 1;
@@ -7957,7 +8899,7 @@ static int msm_sdcc_setup_gpio(int dev_id, unsigned int enable)
 			if (curr->gpio_data[n].always_on)
 				continue;
 			pr_debug("%s: disable: %s\n", __func__,
-					curr->gpio_data[n].name);
+				 curr->gpio_data[n].name);
 			gpio_free(curr->gpio_data[n].no);
 			curr->gpio_data[n].is_enabled = 0;
 		}
@@ -7990,42 +8932,40 @@ static int msm_sdcc_setup_pad(int dev_id, unsigned int enable)
 		for (n = 0; n < curr->pad_drv_data_size; n++) {
 			if (curr->sdio_lpm_gpio_cfg) {
 				if (curr->pad_drv_on_data[n].drv ==
-						TLMM_HDRV_SDC4_DATA)
+				    TLMM_HDRV_SDC4_DATA)
 					continue;
 			}
 			msm_tlmm_set_hdrive(curr->pad_drv_on_data[n].drv,
-				curr->pad_drv_on_data[n].drv_val);
+					    curr->pad_drv_on_data[n].drv_val);
 		}
 		for (n = 0; n < curr->pad_pull_data_size; n++) {
 			if (curr->sdio_lpm_gpio_cfg) {
 				if (curr->pad_pull_on_data[n].pull ==
-						TLMM_PULL_SDC4_DATA)
+				    TLMM_PULL_SDC4_DATA)
 					continue;
 			}
 			msm_tlmm_set_pull(curr->pad_pull_on_data[n].pull,
-				curr->pad_pull_on_data[n].pull_val);
+					  curr->pad_pull_on_data[n].pull_val);
 		}
 	} else {
 		/* set the low power config for pads */
 		for (n = 0; n < curr->pad_drv_data_size; n++) {
 			if (curr->sdio_lpm_gpio_cfg) {
 				if (curr->pad_drv_off_data[n].drv ==
-						TLMM_HDRV_SDC4_DATA)
+				    TLMM_HDRV_SDC4_DATA)
 					continue;
 			}
-			msm_tlmm_set_hdrive(
-				curr->pad_drv_off_data[n].drv,
-				curr->pad_drv_off_data[n].drv_val);
+			msm_tlmm_set_hdrive(curr->pad_drv_off_data[n].drv,
+					    curr->pad_drv_off_data[n].drv_val);
 		}
 		for (n = 0; n < curr->pad_pull_data_size; n++) {
 			if (curr->sdio_lpm_gpio_cfg) {
 				if (curr->pad_pull_off_data[n].pull ==
-						TLMM_PULL_SDC4_DATA)
+				    TLMM_PULL_SDC4_DATA)
 					continue;
 			}
-			msm_tlmm_set_pull(
-				curr->pad_pull_off_data[n].pull,
-				curr->pad_pull_off_data[n].pull_val);
+			msm_tlmm_set_pull(curr->pad_pull_off_data[n].pull,
+					  curr->pad_pull_off_data[n].pull_val);
 		}
 	}
 	curr->cfg_sts = enable;
@@ -8034,7 +8974,7 @@ out:
 }
 
 struct sdcc_reg {
-	/* VDD/VCC/VCCQ regulator name on PMIC8058/PMIC8089*/
+	/* VDD/VCC/VCCQ regulator name on PMIC8058/PMIC8089 */
 	const char *reg_name;
 	/*
 	 * is set voltage supported for this regulator?
@@ -8063,10 +9003,10 @@ static struct sdcc_reg sdcc_vccq_reg_data[1];
 static struct sdcc_reg sdcc_vddp_reg_data[MAX_SDCC_CONTROLLER];
 
 struct sdcc_reg_data {
-	struct sdcc_reg *vdd_data; /* keeps VDD/VCC regulator info */
-	struct sdcc_reg *vccq_data; /* keeps VCCQ regulator info */
-	struct sdcc_reg *vddp_data; /* keeps VDD Pad regulator info */
-	unsigned char sts; /* regulator enable/disable status */
+	struct sdcc_reg *vdd_data;	/* keeps VDD/VCC regulator info */
+	struct sdcc_reg *vccq_data;	/* keeps VCCQ regulator info */
+	struct sdcc_reg *vddp_data;	/* keeps VDD Pad regulator info */
+	unsigned char sts;	/* regulator enable/disable status */
 };
 /* msm8x60 has 5 SDCC controllers */
 static struct sdcc_reg_data sdcc_vreg_data[MAX_SDCC_CONTROLLER];
@@ -8080,17 +9020,16 @@ static int msm_sdcc_vreg_init_reg(struct sdcc_reg *vreg)
 	if (IS_ERR(vreg->reg)) {
 		rc = PTR_ERR(vreg->reg);
 		pr_err("%s: regulator_get(%s) failed. rc=%d\n",
-			__func__, vreg->reg_name, rc);
+		       __func__, vreg->reg_name, rc);
 		goto out;
 	}
 
 	/* Set the voltage level if required */
 	if (vreg->set_voltage_sup) {
-		rc = regulator_set_voltage(vreg->reg, vreg->level,
-					vreg->level);
+		rc = regulator_set_voltage(vreg->reg, vreg->level, vreg->level);
 		if (rc) {
 			pr_err("%s: regulator_set_voltage(%s) failed rc=%d\n",
-				__func__, vreg->reg_name, rc);
+			       __func__, vreg->reg_name, rc);
 			goto vreg_put;
 		}
 	}
@@ -8165,7 +9104,7 @@ static int msm_sdcc_vreg_enable(struct sdcc_reg *vreg)
 		rc = regulator_enable(vreg->reg);
 		if (rc) {
 			pr_err("%s: regulator_enable(%s) failed. rc=%d\n",
-				__func__, vreg->reg_name, rc);
+			       __func__, vreg->reg_name, rc);
 			goto out;
 		}
 		vreg->enabled = 1;
@@ -8176,9 +9115,8 @@ static int msm_sdcc_vreg_enable(struct sdcc_reg *vreg)
 		rc = regulator_set_optimum_mode(vreg->reg, vreg->hpm_uA);
 		if (rc < 0) {
 			pr_err("%s: reg=%s: HPM setting failed"
-				" hpm_uA=%d, rc=%d\n",
-				__func__, vreg->reg_name,
-				vreg->hpm_uA, rc);
+			       " hpm_uA=%d, rc=%d\n",
+			       __func__, vreg->reg_name, vreg->hpm_uA, rc);
 			goto vreg_disable;
 		}
 		rc = 0;
@@ -8201,7 +9139,7 @@ static int msm_sdcc_vreg_disable(struct sdcc_reg *vreg)
 		rc = regulator_disable(vreg->reg);
 		if (rc) {
 			pr_err("%s: regulator_disable(%s) failed. rc=%d\n",
-				__func__, vreg->reg_name, rc);
+			       __func__, vreg->reg_name, rc);
 			goto out;
 		}
 		vreg->enabled = 0;
@@ -8212,10 +9150,8 @@ static int msm_sdcc_vreg_disable(struct sdcc_reg *vreg)
 		rc = regulator_set_optimum_mode(vreg->reg, vreg->lpm_uA);
 		if (rc < 0) {
 			pr_err("%s: reg=%s: LPM setting failed"
-				" lpm_uA=%d, rc=%d\n",
-				__func__,
-				vreg->reg_name,
-				vreg->lpm_uA, rc);
+			       " lpm_uA=%d, rc=%d\n",
+			       __func__, vreg->reg_name, vreg->lpm_uA, rc);
 			goto out;
 		}
 		rc = 0;
@@ -8238,13 +9174,13 @@ static int msm_sdcc_setup_vreg(int dev_id, unsigned char enable)
 
 	/* check if regulators are initialized or not? */
 	if ((curr_vdd_reg && !curr_vdd_reg->reg) ||
-		(curr_vccq_reg && !curr_vccq_reg->reg) ||
-		(curr_vddp_reg && !curr_vddp_reg->reg)) {
+	    (curr_vccq_reg && !curr_vccq_reg->reg) ||
+	    (curr_vddp_reg && !curr_vddp_reg->reg)) {
 		/* initialize voltage regulators required for this SDCC */
 		rc = msm_sdcc_vreg_init(dev_id, 1);
 		if (rc) {
 			pr_err("%s: regulator init failed = %d\n",
-				__func__, rc);
+			       __func__, rc);
 			goto out;
 		}
 	}
@@ -8342,14 +9278,13 @@ static int msm_sdc3_get_wpswitch(struct device *dev)
 
 	status = gpio_request(GPIO_SDC_WP, "SD_WP_Switch");
 	if (status) {
-		pr_err("%s:Failed to request GPIO %d\n",
-					__func__, GPIO_SDC_WP);
+		pr_err("%s:Failed to request GPIO %d\n", __func__, GPIO_SDC_WP);
 	} else {
 		status = gpio_direction_input(GPIO_SDC_WP);
 		if (!status) {
 			status = gpio_get_value_cansleep(GPIO_SDC_WP);
 			pr_info("%s: WP Status for Slot %d = %d\n",
-				 __func__, pdev->id, status);
+				__func__, pdev->id, status);
 		}
 		gpio_free(GPIO_SDC_WP);
 	}
@@ -8357,8 +9292,7 @@ static int msm_sdc3_get_wpswitch(struct device *dev)
 }
 
 #ifdef CONFIG_MMC_MSM_SDC5_SUPPORT
-int sdc5_register_status_notify(void (*callback)(int, void *),
-	void *dev_id)
+int sdc5_register_status_notify(void (*callback) (int, void *), void *dev_id)
 {
 	sdc5_status_notify_cb = callback;
 	sdc5_status_notify_cb_devid = dev_id;
@@ -8367,8 +9301,7 @@ int sdc5_register_status_notify(void (*callback)(int, void *),
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
-int sdc2_register_status_notify(void (*callback)(int, void *),
-	void *dev_id)
+int sdc2_register_status_notify(void (*callback) (int, void *), void *dev_id)
 {
 	sdc2_status_notify_cb = callback;
 	sdc2_status_notify_cb_devid = dev_id;
@@ -8384,27 +9317,23 @@ static irqreturn_t msm8x60_multi_sdio_slot_status_irq(int irq, void *dev_id)
 {
 	int status;
 
-	if (!machine_is_msm8x60_fusion() &&
-	    !machine_is_msm8x60_fusn_ffa())
+	if (!machine_is_msm8x60_fusion() && !machine_is_msm8x60_fusn_ffa())
 		return IRQ_NONE;
 
 	status = gpio_get_value(MDM2AP_SYNC);
-	pr_info("%s: MDM2AP_SYNC Status = %d\n",
-		 __func__, status);
+	pr_info("%s: MDM2AP_SYNC Status = %d\n", __func__, status);
 
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
 	if (sdc2_status_notify_cb) {
 		pr_info("%s: calling sdc2_status_notify_cb\n", __func__);
-		sdc2_status_notify_cb(status,
-			sdc2_status_notify_cb_devid);
+		sdc2_status_notify_cb(status, sdc2_status_notify_cb_devid);
 	}
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC5_SUPPORT
 	if (sdc5_status_notify_cb) {
 		pr_info("%s: calling sdc5_status_notify_cb\n", __func__);
-		sdc5_status_notify_cb(status,
-			sdc5_status_notify_cb_devid);
+		sdc5_status_notify_cb(status, sdc5_status_notify_cb_devid);
 	}
 #endif
 	return IRQ_HANDLED;
@@ -8414,27 +9343,24 @@ static int msm8x60_multi_sdio_init(void)
 {
 	int ret, irq_num;
 
-	if (!machine_is_msm8x60_fusion() &&
-	    !machine_is_msm8x60_fusn_ffa())
+	if (!machine_is_msm8x60_fusion() && !machine_is_msm8x60_fusn_ffa())
 		return 0;
 
 	ret = msm_gpiomux_get(MDM2AP_SYNC);
 	if (ret) {
 		pr_err("%s:Failed to request GPIO %d, ret=%d\n",
-					__func__, MDM2AP_SYNC, ret);
+		       __func__, MDM2AP_SYNC, ret);
 		return ret;
 	}
 
 	irq_num = gpio_to_irq(MDM2AP_SYNC);
 
 	ret = request_irq(irq_num,
-		msm8x60_multi_sdio_slot_status_irq,
-		IRQ_TYPE_EDGE_BOTH,
-		"sdio_multidetection", NULL);
+			  msm8x60_multi_sdio_slot_status_irq,
+			  IRQ_TYPE_EDGE_BOTH, "sdio_multidetection", NULL);
 
 	if (ret) {
-		pr_err("%s:Failed to request irq, ret=%d\n",
-					__func__, ret);
+		pr_err("%s:Failed to request irq, ret=%d\n", __func__, ret);
 		return ret;
 	}
 
@@ -8442,25 +9368,34 @@ static int msm8x60_multi_sdio_init(void)
 }
 
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
+#ifdef CONFIG_MMC_MSM_CARD_HW_DETECTION
+#ifndef CONFIG_MMC_MSM_CARD_HW_DETECT_NO_DEFAULT_STATE
 static unsigned int msm8x60_sdcc_slot_status(struct device *dev)
 {
 	int status;
 
-	status = gpio_request(PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_SDC3_DET - 1)
-				, "SD_HW_Detect");
+	status = gpio_request(XIAOMI_MMC_MSM_CARD_HW_DET_PIN, "SD_HW_Detect");
 	if (status) {
 		pr_err("%s:Failed to request GPIO %d\n", __func__,
-				PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_SDC3_DET - 1));
+		       XIAOMI_MMC_MSM_CARD_HW_DET_PIN);
 	} else {
-		status = gpio_direction_input(
-				PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_SDC3_DET - 1));
-		if (!status)
-			status = !(gpio_get_value_cansleep(
-				PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_SDC3_DET - 1)));
-		gpio_free(PM8058_GPIO_PM_TO_SYS(PMIC_GPIO_SDC3_DET - 1));
+		status = gpio_direction_input(XIAOMI_MMC_MSM_CARD_HW_DET_PIN);
+		if (!status) {
+			/* for MMC_MSM_CARD_HW_DET_PIN
+			 * LOW means card not in, HIGH means card inserted
+			 */
+			status =
+			    gpio_get_value_cansleep
+			    (XIAOMI_MMC_MSM_CARD_HW_DET_PIN);
+		} else
+			pr_err("%s:Failed to get GPIO value(%d)\n", __func__,
+			       status);
+		gpio_free(XIAOMI_MMC_MSM_CARD_HW_DET_PIN);
 	}
-	return (unsigned int) status;
+	return (unsigned int)status;
 }
+#endif /* CONFIG_MMC_MSM_CARD_HW_DETECTION */
+#endif
 #endif
 #endif
 
@@ -8469,31 +9404,31 @@ static unsigned int msm8x60_sdcc_slot_status(struct device *dev)
 
 #ifdef CONFIG_MMC_MSM_SDC1_SUPPORT
 static struct mmc_platform_data msm8x60_sdc1_data = {
-	.ocr_mask       = MMC_VDD_27_28 | MMC_VDD_28_29,
-	.translate_vdd  = msm_sdcc_setup_power,
+	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29,
+	.translate_vdd = msm_sdcc_setup_power,
 #ifdef CONFIG_MMC_MSM_SDC1_8_BIT_SUPPORT
-	.mmc_bus_width  = MMC_CAP_8_BIT_DATA,
+	.mmc_bus_width = MMC_CAP_8_BIT_DATA,
 #else
-	.mmc_bus_width  = MMC_CAP_4_BIT_DATA,
+	.mmc_bus_width = MMC_CAP_4_BIT_DATA,
 #endif
-	.msmsdcc_fmin	= 400000,
-	.msmsdcc_fmid	= 24000000,
-	.msmsdcc_fmax	= 48000000,
-	.nonremovable	= 1,
+	.msmsdcc_fmin = 400000,
+	.msmsdcc_fmid = 24000000,
+	.msmsdcc_fmax = 48000000,
+	.nonremovable = 1,
 	.msm_bus_voting_data = &sps_to_ddr_bus_voting_data,
 };
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC2_SUPPORT
 static struct mmc_platform_data msm8x60_sdc2_data = {
-	.ocr_mask       = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_165_195,
-	.translate_vdd  = msm_sdcc_setup_power,
+	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_165_195,
+	.translate_vdd = msm_sdcc_setup_power,
 	.sdio_lpm_gpio_setup = msm_sdcc_sdio_lpm_gpio,
-	.mmc_bus_width  = MMC_CAP_8_BIT_DATA,
-	.msmsdcc_fmin	= 400000,
-	.msmsdcc_fmid	= 24000000,
-	.msmsdcc_fmax	= 48000000,
-	.nonremovable	= 0,
+	.mmc_bus_width = MMC_CAP_8_BIT_DATA,
+	.msmsdcc_fmin = 400000,
+	.msmsdcc_fmid = 24000000,
+	.msmsdcc_fmax = 48000000,
+	.nonremovable = 0,
 	.register_status_notify = sdc2_register_status_notify,
 #ifdef CONFIG_MSM_SDIO_AL
 	.is_sdio_al_client = 1,
@@ -8504,18 +9439,35 @@ static struct mmc_platform_data msm8x60_sdc2_data = {
 
 #ifdef CONFIG_MMC_MSM_SDC3_SUPPORT
 static struct mmc_platform_data msm8x60_sdc3_data = {
-	.ocr_mask       = MMC_VDD_27_28 | MMC_VDD_28_29,
-	.translate_vdd  = msm_sdcc_setup_power,
-	.mmc_bus_width  = MMC_CAP_4_BIT_DATA,
-	.wpswitch  	= msm_sdc3_get_wpswitch,
-	.status      = msm8x60_sdcc_slot_status,
-	.status_irq  = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
-				       PMIC_GPIO_SDC3_DET - 1),
-	.irq_flags   = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
-	.msmsdcc_fmin	= 400000,
-	.msmsdcc_fmid	= 24000000,
-	.msmsdcc_fmax	= 48000000,
-	.nonremovable	= 0,
+	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29,
+	.translate_vdd = msm_sdcc_setup_power,
+	.mmc_bus_width = MMC_CAP_4_BIT_DATA,
+	.wpswitch = msm_sdc3_get_wpswitch,
+#ifdef CONFIG_MMC_MSM_CARD_HW_DETECTION
+#ifdef CONFIG_MMC_MSM_CARD_HW_DETECT_NO_DEFAULT_STATE
+	.status_gpio = XIAOMI_MMC_MSM_CARD_HW_DET_PIN,
+	/*
+	 * Actually, the gpio has no default state, remember
+	 * a default state every time a card is inserted.
+	 * For the first time detection after bootup,
+	 * always assume a card is already in the slot.
+	 */
+	.is_status_gpio_active_low = -1,
+#else
+	.status = msm8x60_sdcc_slot_status,
+#endif
+#ifdef CONFIG_MACH_MIONE
+	.status_irq = MSM_GPIO_TO_INT(XIAOMI_MMC_MSM_CARD_HW_DET_PIN),
+#else
+	.status_irq = PM8058_GPIO_IRQ(PM8058_IRQ_BASE,
+				      PMIC_GPIO_SDC3_DET - 1),
+#endif
+	.irq_flags = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+#endif
+	.msmsdcc_fmin = 400000,
+	.msmsdcc_fmid = 24000000,
+	.msmsdcc_fmax = 48000000,
+	.nonremovable = 0,
 	.mpm_sdiowakeup_int = MSM_MPM_PIN_SDC3_DAT1,
 	.msm_bus_voting_data = &sps_to_ddr_bus_voting_data,
 };
@@ -8523,28 +9475,33 @@ static struct mmc_platform_data msm8x60_sdc3_data = {
 
 #ifdef CONFIG_MMC_MSM_SDC4_SUPPORT
 static struct mmc_platform_data msm8x60_sdc4_data = {
-	.ocr_mask       = MMC_VDD_27_28 | MMC_VDD_28_29,
-	.translate_vdd  = msm_sdcc_setup_power,
-	.mmc_bus_width  = MMC_CAP_4_BIT_DATA,
-	.msmsdcc_fmin	= 400000,
-	.msmsdcc_fmid	= 24000000,
-	.msmsdcc_fmax	= 48000000,
-	.nonremovable	= 0,
-	.mpm_sdiowakeup_int = MSM_MPM_PIN_SDC4_DAT1,
+	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29,
+	.translate_vdd = msm_sdcc_setup_power,
+	.mmc_bus_width = MMC_CAP_4_BIT_DATA,
+	.msmsdcc_fmin = 400000,
+	.msmsdcc_fmid = 24000000,
+	.msmsdcc_fmax = 48000000,
+	.nonremovable = 0,
+	/* .mpm_sdiowakeup_int = MSM_MPM_PIN_SDC4_DAT1, */
 	.msm_bus_voting_data = &sps_to_ddr_bus_voting_data,
+	.built_in = 1,
+	/* .cfg_mpm_sdiowakeup = msm_sdcc_cfg_mpm_sdiowakeup, */
+	.status = bcm_wifi_status,
+	.register_status_notify = bcm_wifi_status_register,
+	.embedded_sdio = &bcm_wifi_emb_data,
 };
 #endif
 
 #ifdef CONFIG_MMC_MSM_SDC5_SUPPORT
 static struct mmc_platform_data msm8x60_sdc5_data = {
-	.ocr_mask       = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_165_195,
-	.translate_vdd  = msm_sdcc_setup_power,
+	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_165_195,
+	.translate_vdd = msm_sdcc_setup_power,
 	.sdio_lpm_gpio_setup = msm_sdcc_sdio_lpm_gpio,
-	.mmc_bus_width  = MMC_CAP_4_BIT_DATA,
-	.msmsdcc_fmin	= 400000,
-	.msmsdcc_fmid	= 24000000,
-	.msmsdcc_fmax	= 48000000,
-	.nonremovable	= 0,
+	.mmc_bus_width = MMC_CAP_4_BIT_DATA,
+	.msmsdcc_fmin = 400000,
+	.msmsdcc_fmid = 24000000,
+	.msmsdcc_fmax = 48000000,
+	.nonremovable = 0,
 	.register_status_notify = sdc5_register_status_notify,
 #ifdef CONFIG_MSM_SDIO_AL
 	.is_sdio_al_client = 1,
@@ -8658,7 +9615,13 @@ static void __init msm8x60_init_mmc(void)
 }
 
 #if !defined(CONFIG_GPIO_SX150X) && !defined(CONFIG_GPIO_SX150X_MODULE)
-static inline void display_common_power(int on) {}
+static inline void display_common_power(int on)
+{
+}
+
+static void setup_display_power(void)
+{
+}
 #else
 
 #define _GET_REGULATOR(var, name) do {					\
@@ -8742,19 +9705,19 @@ static void setup_display_power(void)
 			gpio_set_value_cansleep(GPIO_LVDS_SHUTDOWN_N, 0);
 			gpio_set_value_cansleep(GPIO_BACKLIGHT_EN, 0);
 			if (machine_is_msm8x60_ffa() ||
-			    machine_is_msm8x60_fusn_ffa())
+			    machine_is_mione() || machine_is_msm8x60_fusn_ffa())
 				gpio_set_value_cansleep(GPIO_DONGLE_PWR_EN, 1);
 		} else {
 			dsub_regulator(0);
 			gpio_set_value_cansleep(GPIO_LVDS_SHUTDOWN_N, 1);
 			gpio_set_value_cansleep(GPIO_BACKLIGHT_EN, 1);
 			if (machine_is_msm8x60_ffa() ||
-			    machine_is_msm8x60_fusn_ffa())
+			    machine_is_mione() || machine_is_msm8x60_fusn_ffa())
 				gpio_set_value_cansleep(GPIO_DONGLE_PWR_EN, 0);
-		}
-	else {
+	} else {
 		dsub_regulator(0);
-		if (machine_is_msm8x60_ffa() || machine_is_msm8x60_fusn_ffa())
+		if (machine_is_msm8x60_ffa() || machine_is_msm8x60_fusn_ffa()
+		    || machine_is_mione())
 			gpio_set_value_cansleep(GPIO_DONGLE_PWR_EN, 0);
 		/* BACKLIGHT */
 		gpio_set_value_cansleep(GPIO_BACKLIGHT_EN, 0);
@@ -8782,6 +9745,7 @@ static void display_common_power(int on)
 	static struct regulator *display_reg;
 
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() ||
+	    machine_is_mione() ||
 	    machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa()) {
 		if (on) {
 			/* LVDS */
@@ -8789,18 +9753,18 @@ static void display_common_power(int on)
 			if (!display_reg)
 				return;
 			rc = regulator_set_voltage(display_reg,
-				3300000, 3300000);
+						   3300000, 3300000);
 			if (rc)
 				goto out;
 			rc = regulator_enable(display_reg);
 			if (rc)
 				goto out;
 			rc = gpio_request(GPIO_LVDS_SHUTDOWN_N,
-				"LVDS_STDN_OUT_N");
+					  "LVDS_STDN_OUT_N");
 			if (rc) {
 				printk(KERN_ERR "%s: LVDS gpio %d request"
-					"failed\n", __func__,
-					 GPIO_LVDS_SHUTDOWN_N);
+				       "failed\n", __func__,
+				       GPIO_LVDS_SHUTDOWN_N);
 				goto out2;
 			}
 
@@ -8808,13 +9772,13 @@ static void display_common_power(int on)
 			rc = gpio_request(GPIO_BACKLIGHT_EN, "BACKLIGHT_EN");
 			if (rc) {
 				printk(KERN_ERR "%s: BACKLIGHT gpio %d request"
-					"failed\n", __func__,
-					 GPIO_BACKLIGHT_EN);
+				       "failed\n", __func__, GPIO_BACKLIGHT_EN);
 				goto out3;
 			}
 
 			if (machine_is_msm8x60_ffa() ||
-			    machine_is_msm8x60_fusn_ffa()) {
+			    machine_is_msm8x60_fusn_ffa() ||
+			    machine_is_mione()) {
 				rc = gpio_request(GPIO_DONGLE_PWR_EN,
 						  "DONGLE_PWR_EN");
 				if (rc) {
@@ -8828,7 +9792,7 @@ static void display_common_power(int on)
 			gpio_direction_output(GPIO_LVDS_SHUTDOWN_N, 0);
 			gpio_direction_output(GPIO_BACKLIGHT_EN, 0);
 			if (machine_is_msm8x60_ffa() ||
-			    machine_is_msm8x60_fusn_ffa())
+			    machine_is_msm8x60_fusn_ffa() || machine_is_mione())
 				gpio_direction_output(GPIO_DONGLE_PWR_EN, 0);
 			mdelay(20);
 			display_power_on = 1;
@@ -8839,7 +9803,8 @@ static void display_common_power(int on)
 				setup_display_power();
 				mdelay(20);
 				if (machine_is_msm8x60_ffa() ||
-				    machine_is_msm8x60_fusn_ffa())
+				    machine_is_msm8x60_fusn_ffa() ||
+				    machine_is_mione())
 					gpio_free(GPIO_DONGLE_PWR_EN);
 				goto out4;
 			}
@@ -8909,8 +9874,9 @@ static void display_common_power(int on)
 
 			rc = gpio_request(GPIO_NT35582_BL_EN, "lcdc_bl_en");
 			if (rc) {
-				pr_err("%s: gpio %d request failed with rc=%d\n",
-					__func__, GPIO_NT35582_BL_EN, rc);
+				pr_err
+				    ("%s: gpio %d request failed with rc=%d\n",
+				     __func__, GPIO_NT35582_BL_EN, rc);
 				regulator_put(dragon_reg);
 				regulator_put(dragon_reg2);
 				dragon_reg = NULL;
@@ -8919,10 +9885,12 @@ static void display_common_power(int on)
 			}
 
 			if (gpio_tlmm_config(GPIO_CFG(GPIO_NT35582_RESET, 0,
-				GPIO_CFG_OUTPUT, GPIO_CFG_PULL_DOWN,
-				GPIO_CFG_16MA), GPIO_CFG_ENABLE)) {
+						      GPIO_CFG_OUTPUT,
+						      GPIO_CFG_PULL_DOWN,
+						      GPIO_CFG_16MA),
+					     GPIO_CFG_ENABLE)) {
 				pr_err("%s: config gpio '%d' failed!\n",
-					__func__, GPIO_NT35582_RESET);
+				       __func__, GPIO_NT35582_RESET);
 				gpio_free(GPIO_NT35582_BL_EN);
 				regulator_put(dragon_reg);
 				regulator_put(dragon_reg2);
@@ -8933,8 +9901,9 @@ static void display_common_power(int on)
 
 			rc = gpio_request(GPIO_NT35582_RESET, "lcdc_reset");
 			if (rc) {
-				pr_err("%s: unable to request gpio %d (rc=%d)\n",
-					__func__, GPIO_NT35582_RESET, rc);
+				pr_err
+				    ("%s: unable to request gpio %d (rc=%d)\n",
+				     __func__, GPIO_NT35582_RESET, rc);
 				gpio_free(GPIO_NT35582_BL_EN);
 				regulator_put(dragon_reg);
 				regulator_put(dragon_reg2);
@@ -8984,6 +9953,7 @@ out:
 	regulator_put(display_reg);
 	display_reg = NULL;
 }
+
 #undef _GET_REGULATOR
 #endif
 
@@ -9014,7 +9984,7 @@ static void lcdc_samsung_panel_power(int on)
 			gpio_free(LCDC_GPIO_START + n);
 	}
 
-	mipi_dsi_panel_power(0); /* set 8058_ldo0 to LPM */
+	mipi_dsi_panel_power(0);	/* set 8058_ldo0 to LPM */
 }
 
 #ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
@@ -9031,7 +10001,7 @@ static void lcdc_samsung_panel_power(int on)
 static int hdmi_enable_5v(int on)
 {
 	static struct regulator *reg_8901_hdmi_mvs;	/* HDMI_5V */
-	static struct regulator *reg_8901_mpp0;		/* External 5V */
+	static struct regulator *reg_8901_mpp0;	/* External 5V */
 	static int prev_on;
 	int rc;
 
@@ -9047,13 +10017,13 @@ static int hdmi_enable_5v(int on)
 		rc = regulator_enable(reg_8901_mpp0);
 		if (rc) {
 			pr_err("'%s' regulator enable failed, rc=%d\n",
-				"reg_8901_mpp0", rc);
+			       "reg_8901_mpp0", rc);
 			return rc;
 		}
 		rc = regulator_enable(reg_8901_hdmi_mvs);
 		if (rc) {
 			pr_err("'%s' regulator enable failed, rc=%d\n",
-				"8901_hdmi_mvs", rc);
+			       "8901_hdmi_mvs", rc);
 			return rc;
 		}
 		pr_info("%s(on): success\n", __func__);
@@ -9061,11 +10031,11 @@ static int hdmi_enable_5v(int on)
 		rc = regulator_disable(reg_8901_hdmi_mvs);
 		if (rc)
 			pr_warning("'%s' regulator disable failed, rc=%d\n",
-				"8901_hdmi_mvs", rc);
+				   "8901_hdmi_mvs", rc);
 		rc = regulator_disable(reg_8901_mpp0);
 		if (rc)
 			pr_warning("'%s' regulator disable failed, rc=%d\n",
-				"reg_8901_mpp0", rc);
+				   "reg_8901_mpp0", rc);
 		pr_info("%s(off): success\n", __func__);
 	}
 
@@ -9076,7 +10046,7 @@ static int hdmi_enable_5v(int on)
 
 static int hdmi_core_power(int on, int show)
 {
-	static struct regulator *reg_8058_l16;		/* VDD_HDMI */
+	static struct regulator *reg_8058_l16;	/* VDD_HDMI */
 	static int prev_on;
 	int rc;
 
@@ -9092,7 +10062,7 @@ static int hdmi_core_power(int on, int show)
 			rc = regulator_enable(reg_8058_l16);
 		if (rc) {
 			pr_err("'%s' regulator enable failed, rc=%d\n",
-				"8058_l16", rc);
+			       "8058_l16", rc);
 			return rc;
 		}
 		pr_debug("%s(on): success\n", __func__);
@@ -9100,7 +10070,7 @@ static int hdmi_core_power(int on, int show)
 		rc = regulator_disable(reg_8058_l16);
 		if (rc)
 			pr_warning("'%s' regulator disable failed, rc=%d\n",
-				"8058_l16", rc);
+				   "8058_l16", rc);
 		pr_debug("%s(off): success\n", __func__);
 	}
 
@@ -9121,19 +10091,19 @@ static int hdmi_gpio_config(int on)
 		rc = gpio_request(170, "HDMI_DDC_CLK");
 		if (rc) {
 			pr_err("'%s'(%d) gpio_request failed, rc=%d\n",
-				"HDMI_DDC_CLK", 170, rc);
+			       "HDMI_DDC_CLK", 170, rc);
 			goto error1;
 		}
 		rc = gpio_request(171, "HDMI_DDC_DATA");
 		if (rc) {
 			pr_err("'%s'(%d) gpio_request failed, rc=%d\n",
-				"HDMI_DDC_DATA", 171, rc);
+			       "HDMI_DDC_DATA", 171, rc);
 			goto error2;
 		}
 		rc = gpio_request(172, "HDMI_HPD");
 		if (rc) {
 			pr_err("'%s'(%d) gpio_request failed, rc=%d\n",
-				"HDMI_HPD", 172, rc);
+			       "HDMI_HPD", 172, rc);
 			goto error3;
 		}
 		pr_debug("%s(on): success\n", __func__);
@@ -9157,7 +10127,7 @@ error1:
 
 static int hdmi_cec_power(int on)
 {
-	static struct regulator *reg_8901_l3;		/* HDMI_CEC */
+	static struct regulator *reg_8901_l3;	/* HDMI_CEC */
 	static int prev_on;
 	int rc;
 
@@ -9173,13 +10143,13 @@ static int hdmi_cec_power(int on)
 			rc = regulator_enable(reg_8901_l3);
 		if (rc) {
 			pr_err("'%s' regulator enable failed, rc=%d\n",
-				"8901_l3", rc);
+			       "8901_l3", rc);
 			return rc;
 		}
 		rc = gpio_request(169, "HDMI_CEC_VAR");
 		if (rc) {
 			pr_err("'%s'(%d) gpio_request failed, rc=%d\n",
-				"HDMI_CEC_VAR", 169, rc);
+			       "HDMI_CEC_VAR", 169, rc);
 			goto error;
 		}
 		pr_info("%s(on): success\n", __func__);
@@ -9188,7 +10158,7 @@ static int hdmi_cec_power(int on)
 		rc = regulator_disable(reg_8901_l3);
 		if (rc)
 			pr_warning("'%s' regulator disable failed, rc=%d\n",
-				"8901_l3", rc);
+				   "8901_l3", rc);
 		pr_info("%s(off): success\n", __func__);
 	}
 
@@ -9212,6 +10182,7 @@ static int hdmi_panel_power(int on)
 	pr_debug("%s: HDMI Core: %s Success\n", __func__, (on ? "ON" : "OFF"));
 	return rc;
 }
+
 #undef _GET_REGULATOR
 
 #endif /* CONFIG_FB_MSM_HDMI_MSM_PANEL */
@@ -9235,100 +10206,100 @@ static int lcdc_panel_power(int on)
 
 static struct msm_bus_vectors rotator_init_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors rotator_ui_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = 0,
-		.ib  = 0,
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = (1024 * 600 * 4 * 2 * 60),
-		.ib  = (1024 * 600 * 4 * 2 * 60 * 1.5),
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = (1024 * 600 * 4 * 2 * 60),
+	 .ib = (1024 * 600 * 4 * 2 * 60 * 1.5),
+	 },
 };
 
 static struct msm_bus_vectors rotator_vga_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = (640 * 480 * 2 * 2 * 30),
-		.ib  = (640 * 480 * 2 * 2 * 30 * 1.5),
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = (640 * 480 * 2 * 2 * 30),
+	 .ib = (640 * 480 * 2 * 2 * 30 * 1.5),
+	 },
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = (640 * 480 * 2 * 2 * 30),
-		.ib  = (640 * 480 * 2 * 2 * 30 * 1.5),
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = (640 * 480 * 2 * 2 * 30),
+	 .ib = (640 * 480 * 2 * 2 * 30 * 1.5),
+	 },
 };
 
 static struct msm_bus_vectors rotator_720p_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = (1280 * 736 * 2 * 2 * 30),
-		.ib  = (1280 * 736 * 2 * 2 * 30 * 1.5),
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = (1280 * 736 * 2 * 2 * 30),
+	 .ib = (1280 * 736 * 2 * 2 * 30 * 1.5),
+	 },
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = (1280 * 736 * 2 * 2 * 30),
-		.ib  = (1280 * 736 * 2 * 2 * 30 * 1.5),
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = (1280 * 736 * 2 * 2 * 30),
+	 .ib = (1280 * 736 * 2 * 2 * 30 * 1.5),
+	 },
 };
 
 static struct msm_bus_vectors rotator_1080p_vectors[] = {
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab  = (1920 * 1088 * 2 * 2 * 30),
-		.ib  = (1920 * 1088 * 2 * 2 * 30 * 1.5),
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = (1920 * 1088 * 2 * 2 * 30),
+	 .ib = (1920 * 1088 * 2 * 2 * 30 * 1.5),
+	 },
 	{
-		.src = MSM_BUS_MASTER_ROTATOR,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab  = (1920 * 1088 * 2 * 2 * 30),
-		.ib  = (1920 * 1088 * 2 * 2 * 30 * 1.5),
-	},
+	 .src = MSM_BUS_MASTER_ROTATOR,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = (1920 * 1088 * 2 * 2 * 30),
+	 .ib = (1920 * 1088 * 2 * 2 * 30 * 1.5),
+	 },
 };
 
 static struct msm_bus_paths rotator_bus_scale_usecases[] = {
 	{
-		ARRAY_SIZE(rotator_init_vectors),
-		rotator_init_vectors,
-	},
+	 ARRAY_SIZE(rotator_init_vectors),
+	 rotator_init_vectors,
+	 },
 	{
-		ARRAY_SIZE(rotator_ui_vectors),
-		rotator_ui_vectors,
-	},
+	 ARRAY_SIZE(rotator_ui_vectors),
+	 rotator_ui_vectors,
+	 },
 	{
-		ARRAY_SIZE(rotator_vga_vectors),
-		rotator_vga_vectors,
-	},
+	 ARRAY_SIZE(rotator_vga_vectors),
+	 rotator_vga_vectors,
+	 },
 	{
-		ARRAY_SIZE(rotator_720p_vectors),
-		rotator_720p_vectors,
-	},
+	 ARRAY_SIZE(rotator_720p_vectors),
+	 rotator_720p_vectors,
+	 },
 	{
-		ARRAY_SIZE(rotator_1080p_vectors),
-		rotator_1080p_vectors,
-	},
+	 ARRAY_SIZE(rotator_1080p_vectors),
+	 rotator_1080p_vectors,
+	 },
 };
 
 struct msm_bus_scale_pdata rotator_bus_scale_pdata = {
@@ -9342,214 +10313,218 @@ static struct msm_bus_vectors mdp_init_vectors[] = {
 	 * Please leave 0 as is and don't use it
 	 */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 #ifdef CONFIG_FB_MSM_LCDC_DSUB
 static struct msm_bus_vectors mdp_sd_smi_vectors[] = {
 	/* Default case static display/UI/2d/3d if FB SMI */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 388800000,
-		.ib = 486000000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 388800000,
+	 .ib = 486000000,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors mdp_sd_ebi_vectors[] = {
 	/* Default case static display/UI/2d/3d if FB SMI */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 388800000,
-		.ib = 486000000 * 2,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 388800000,
+	 .ib = 486000000 * 2,
+	 },
 };
+
 static struct msm_bus_vectors mdp_vga_vectors[] = {
 	/* VGA and less video */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 458092800,
-		.ib = 572616000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 458092800,
+	 .ib = 572616000,
+	 },
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 458092800,
-		.ib = 572616000 * 2,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 458092800,
+	 .ib = 572616000 * 2,
+	 },
 };
+
 static struct msm_bus_vectors mdp_720p_vectors[] = {
 	/* 720p and less video */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 471744000,
-		.ib = 589680000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 471744000,
+	 .ib = 589680000,
+	 },
 	/* Master and slaves can be from different fabrics */
-       {
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-	       .ab = 471744000,
-	       .ib = 589680000 * 2,
-	},
+	{
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 471744000,
+	 .ib = 589680000 * 2,
+	 },
 };
 
 static struct msm_bus_vectors mdp_1080p_vectors[] = {
 	/* 1080p and less video */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 575424000,
-		.ib = 719280000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 575424000,
+	 .ib = 719280000,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 575424000,
-		.ib = 719280000 * 2,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 575424000,
+	 .ib = 719280000 * 2,
+	 },
 };
 
 #else
 static struct msm_bus_vectors mdp_sd_smi_vectors[] = {
 	/* Default case static display/UI/2d/3d if FB SMI */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 175110000,
-		.ib = 218887500,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 175110000,
+	 .ib = 218887500,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors mdp_sd_ebi_vectors[] = {
 	/* Default case static display/UI/2d/3d if FB SMI */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 216000000,
-		.ib = 270000000 * 2,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 216000000,
+	 .ib = 270000000 * 2,
+	 },
 };
+
 static struct msm_bus_vectors mdp_vga_vectors[] = {
 	/* VGA and less video */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 216000000,
-		.ib = 270000000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 216000000,
+	 .ib = 270000000,
+	 },
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 216000000,
-		.ib = 270000000 * 2,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 216000000,
+	 .ib = 270000000 * 2,
+	 },
 };
 
 static struct msm_bus_vectors mdp_720p_vectors[] = {
 	/* 720p and less video */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 230400000,
-		.ib = 288000000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 230400000,
+	 .ib = 288000000,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 230400000,
-		.ib = 288000000 * 2,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 230400000,
+	 .ib = 288000000 * 2,
+	 },
 };
 
 static struct msm_bus_vectors mdp_1080p_vectors[] = {
 	/* 1080p and less video */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 334080000,
-		.ib = 417600000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 334080000,
+	 .ib = 417600000,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 334080000,
-		.ib = 550000000 * 2,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 334080000,
+	 .ib = 550000000 * 2,
+	 },
 };
 
 #endif
 static struct msm_bus_paths mdp_bus_scale_usecases[] = {
 	{
-		ARRAY_SIZE(mdp_init_vectors),
-		mdp_init_vectors,
-	},
+	 ARRAY_SIZE(mdp_init_vectors),
+	 mdp_init_vectors,
+	 },
 	{
-		ARRAY_SIZE(mdp_sd_smi_vectors),
-		mdp_sd_smi_vectors,
-	},
+	 ARRAY_SIZE(mdp_sd_smi_vectors),
+	 mdp_sd_smi_vectors,
+	 },
 	{
-		ARRAY_SIZE(mdp_sd_ebi_vectors),
-		mdp_sd_ebi_vectors,
-	},
+	 ARRAY_SIZE(mdp_sd_ebi_vectors),
+	 mdp_sd_ebi_vectors,
+	 },
 	{
-		ARRAY_SIZE(mdp_vga_vectors),
-		mdp_vga_vectors,
-	},
+	 ARRAY_SIZE(mdp_vga_vectors),
+	 mdp_vga_vectors,
+	 },
 	{
-		ARRAY_SIZE(mdp_720p_vectors),
-		mdp_720p_vectors,
-	},
+	 ARRAY_SIZE(mdp_720p_vectors),
+	 mdp_720p_vectors,
+	 },
 	{
-		ARRAY_SIZE(mdp_1080p_vectors),
-		mdp_1080p_vectors,
-	},
+	 ARRAY_SIZE(mdp_1080p_vectors),
+	 mdp_1080p_vectors,
+	 },
 };
+
 static struct msm_bus_scale_pdata mdp_bus_scale_pdata = {
 	mdp_bus_scale_usecases,
 	ARRAY_SIZE(mdp_bus_scale_usecases),
@@ -9563,18 +10538,18 @@ static struct msm_bus_vectors dtv_bus_init_vectors[] = {
 	 * Please leave 0 as is and don't use it
 	 */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
 
 static struct msm_bus_vectors dtv_bus_def_vectors[] = {
@@ -9582,18 +10557,18 @@ static struct msm_bus_vectors dtv_bus_def_vectors[] = {
 	 * Please leave 0 as is and don't use it
 	 */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 566092800,
-		.ib = 707616000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 566092800,
+	 .ib = 707616000,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 566092800,
-		.ib = 707616000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 566092800,
+	 .ib = 707616000,
+	 },
 };
 
 static struct msm_bus_vectors dtv_bus_hdmi_prim_vectors[] = {
@@ -9601,29 +10576,29 @@ static struct msm_bus_vectors dtv_bus_hdmi_prim_vectors[] = {
 	 * Please leave 0 as is and don't use it
 	 */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 2000000000,
-		.ib = 2000000000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 2000000000,
+	 .ib = 2000000000,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 2000000000,
-		.ib = 2000000000,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 2000000000,
+	 .ib = 2000000000,
+	 },
 };
 
 static struct msm_bus_paths dtv_bus_scale_usecases[] = {
 	{
-		ARRAY_SIZE(dtv_bus_init_vectors),
-		dtv_bus_init_vectors,
-	},
+	 ARRAY_SIZE(dtv_bus_init_vectors),
+	 dtv_bus_init_vectors,
+	 },
 	{
-		ARRAY_SIZE(dtv_bus_def_vectors),
-		dtv_bus_def_vectors,
-	},
+	 ARRAY_SIZE(dtv_bus_def_vectors),
+	 dtv_bus_def_vectors,
+	 },
 };
 
 static struct msm_bus_scale_pdata dtv_bus_scale_pdata = {
@@ -9634,18 +10609,20 @@ static struct msm_bus_scale_pdata dtv_bus_scale_pdata = {
 
 static struct lcdc_platform_data dtv_pdata = {
 	.bus_scale_table = &dtv_bus_scale_pdata,
+#ifdef CONFIG_FB_MSM_HDMI_MSM_PANEL
 	.lcdc_power_save = hdmi_panel_power,
+#endif
 };
 
 static struct msm_bus_paths dtv_hdmi_prim_bus_scale_usecases[] = {
 	{
-		ARRAY_SIZE(dtv_bus_init_vectors),
-		dtv_bus_init_vectors,
-	},
+	 ARRAY_SIZE(dtv_bus_init_vectors),
+	 dtv_bus_init_vectors,
+	 },
 	{
-		ARRAY_SIZE(dtv_bus_hdmi_prim_vectors),
-		dtv_bus_hdmi_prim_vectors,
-	},
+	 ARRAY_SIZE(dtv_bus_hdmi_prim_vectors),
+	 dtv_bus_hdmi_prim_vectors,
+	 },
 };
 
 static struct msm_bus_scale_pdata dtv_hdmi_prim_bus_scale_pdata = {
@@ -9659,13 +10636,49 @@ static struct lcdc_platform_data dtv_hdmi_prim_pdata = {
 };
 #endif
 
-
 static struct lcdc_platform_data lcdc_pdata = {
-	.lcdc_power_save   = lcdc_panel_power,
+	.lcdc_power_save = lcdc_panel_power,
 };
 
-
 #define MDP_VSYNC_GPIO			28
+#define MIPI_DSI_RESET_GPIO            169
+
+static int mipi_gpio_panel_power(int on)
+{
+	int rc = -EINVAL;
+	static unsigned int reset_gpio;
+
+	if (!reset_gpio) {
+		reset_gpio = MIPI_DSI_RESET_GPIO;
+		pr_info("assign reset gpio %d\n", reset_gpio);
+
+		rc = gpio_request(reset_gpio, "lcd reset gpio");
+		if (rc) {
+			pr_err("lcd reset gpio %d request fail rc %d\n",
+			       reset_gpio, rc);
+			reset_gpio = 0;
+			goto out;
+		}
+	}
+
+	if (on) {
+		rc = gpio_direction_output(reset_gpio, 0);
+		msleep(10);
+		rc = gpio_direction_output(reset_gpio, 1);
+		msleep(10);
+		rc = gpio_direction_output(reset_gpio, 0);
+		msleep(10);
+		rc = gpio_direction_output(reset_gpio, 1);
+		msleep(10);
+		pr_info("reset_gpio %d high\n", reset_gpio);
+		msleep(10);
+	} else {
+		rc = gpio_direction_output(reset_gpio, 0);
+		pr_info("reset_gpio %d low\n", reset_gpio);
+	}
+out:
+	return rc;
+}
 
 /*
  * MIPI_DSI only use 8058_LDO0 which need always on
@@ -9678,6 +10691,12 @@ static int mipi_dsi_panel_power(int on)
 	static int mipi_dsi_power_save_on;
 	static struct regulator *ldo0;
 	int rc = 0;
+	static int blon;
+
+	if (!blon) {
+		blon = 1;
+		return 0;
+	}
 
 	if (mipi_dsi_power_save_on == flag_on)
 		return 0;
@@ -9685,14 +10704,14 @@ static int mipi_dsi_panel_power(int on)
 	mipi_dsi_power_save_on = flag_on;
 
 	if (ldo0 == NULL) {	/* init */
-		ldo0 = regulator_get(NULL, "8058_l0");
+		ldo0 = regulator_get(NULL, "8901_l2");
 		if (IS_ERR(ldo0)) {
 			pr_debug("%s: LDO0 failed\n", __func__);
 			rc = PTR_ERR(ldo0);
 			return rc;
 		}
 
-		rc = regulator_set_voltage(ldo0, 1200000, 1200000);
+		rc = regulator_set_voltage(ldo0, 3000000, 3000000);
 		if (rc)
 			goto out;
 
@@ -9706,6 +10725,7 @@ static int mipi_dsi_panel_power(int on)
 		rc = regulator_set_optimum_mode(ldo0, 100000);
 		if (rc < 0)
 			goto out;
+
 	} else {
 		/* set ldo0 to LPM */
 		rc = regulator_set_optimum_mode(ldo0, 1000);
@@ -9713,8 +10733,13 @@ static int mipi_dsi_panel_power(int on)
 			goto out;
 	}
 
+	rc = mipi_gpio_panel_power(on);
+	if (rc < 0)
+		goto out;
+
 	return 0;
 out:
+	pr_err("%s: fail to out\n", __func__);
 	regulator_disable(ldo0);
 	regulator_put(ldo0);
 	ldo0 = NULL;
@@ -9723,7 +10748,7 @@ out:
 
 static struct mipi_dsi_platform_data mipi_dsi_pdata = {
 	.vsync_gpio = MDP_VSYNC_GPIO,
-	.dsi_power_save   = mipi_dsi_panel_power,
+	.dsi_power_save = mipi_dsi_panel_power,
 };
 
 #ifdef CONFIG_FB_MSM_TVOUT
@@ -9732,7 +10757,7 @@ static struct regulator *reg_8058_l13;
 static int atv_dac_power(int on)
 {
 	int rc = 0;
-	#define _GET_REGULATOR(var, name) do {				\
+#define _GET_REGULATOR(var, name) do {				\
 		var = regulator_get(NULL, name);			\
 		if (IS_ERR(var)) {					\
 			pr_info("'%s' regulator not found, rc=%ld\n",	\
@@ -9744,7 +10769,7 @@ static int atv_dac_power(int on)
 
 	if (!reg_8058_l13)
 		_GET_REGULATOR(reg_8058_l13, "8058_l13");
-	#undef _GET_REGULATOR
+#undef _GET_REGULATOR
 
 	if (on) {
 		rc = regulator_set_voltage(reg_8058_l13, 2050000, 2050000);
@@ -9764,7 +10789,7 @@ static int atv_dac_power(int on)
 		rc = regulator_force_disable(reg_8058_l13);
 		if (rc)
 			pr_warning("%s: '%s' regulator disable failed, rc=%d\n",
-				__func__, "8058_l13", rc);
+				   __func__, "8058_l13", rc);
 	}
 	return rc;
 
@@ -9791,10 +10816,8 @@ static void __init reserve_mdp_memory(void)
 	mdp_pdata.ov0_wb_size = MSM_FB_OVERLAY0_WRITEBACK_SIZE;
 	mdp_pdata.ov1_wb_size = MSM_FB_OVERLAY1_WRITEBACK_SIZE;
 #if defined(CONFIG_ANDROID_PMEM) && !defined(CONFIG_MSM_MULTIMEDIA_USE_ION)
-	msm8x60_reserve_table[mdp_pdata.mem_hid].size +=
-		mdp_pdata.ov0_wb_size;
-	msm8x60_reserve_table[mdp_pdata.mem_hid].size +=
-		mdp_pdata.ov1_wb_size;
+	msm8x60_reserve_table[mdp_pdata.mem_hid].size += mdp_pdata.ov0_wb_size;
+	msm8x60_reserve_table[mdp_pdata.mem_hid].size += mdp_pdata.ov1_wb_size;
 #endif
 }
 
@@ -9806,47 +10829,50 @@ static struct msm_bus_vectors atv_bus_init_vectors[] = {
 	 * Please leave 0 as is and don't use it
 	 */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 0,
-		.ib = 0,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 0,
+	 .ib = 0,
+	 },
 };
+
 static struct msm_bus_vectors atv_bus_def_vectors[] = {
 	/* For now, 0th array entry is reserved.
 	 * Please leave 0 as is and don't use it
 	 */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_SMI,
-		.ab = 236390400,
-		.ib = 265939200,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_SMI,
+	 .ab = 236390400,
+	 .ib = 265939200,
+	 },
 	/* Master and slaves can be from different fabrics */
 	{
-		.src = MSM_BUS_MASTER_MDP_PORT0,
-		.dst = MSM_BUS_SLAVE_EBI_CH0,
-		.ab = 236390400,
-		.ib = 265939200,
-	},
+	 .src = MSM_BUS_MASTER_MDP_PORT0,
+	 .dst = MSM_BUS_SLAVE_EBI_CH0,
+	 .ab = 236390400,
+	 .ib = 265939200,
+	 },
 };
+
 static struct msm_bus_paths atv_bus_scale_usecases[] = {
 	{
-		ARRAY_SIZE(atv_bus_init_vectors),
-		atv_bus_init_vectors,
-	},
+	 ARRAY_SIZE(atv_bus_init_vectors),
+	 atv_bus_init_vectors,
+	 },
 	{
-		ARRAY_SIZE(atv_bus_def_vectors),
-		atv_bus_def_vectors,
-	},
+	 ARRAY_SIZE(atv_bus_def_vectors),
+	 atv_bus_def_vectors,
+	 },
 };
+
 static struct msm_bus_scale_pdata atv_bus_scale_pdata = {
 	atv_bus_scale_usecases,
 	ARRAY_SIZE(atv_bus_scale_usecases),
@@ -9855,8 +10881,8 @@ static struct msm_bus_scale_pdata atv_bus_scale_pdata = {
 #endif
 
 static struct tvenc_platform_data atv_pdata = {
-	.poll		 = 0,
-	.pm_vid_en	 = atv_dac_power,
+	.poll = 0,
+	.pm_vid_en = atv_dac_power,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.bus_scale_table = &atv_bus_scale_pdata,
 #endif
@@ -9929,25 +10955,26 @@ static const struct {
 	int vmin;
 	int vmax;
 } bt_regs_info[] = {
-	{ "8058_s3", 1800000, 1800000 },
-	{ "8058_s2", 1300000, 1300000 },
-	{ "8058_l8", 2900000, 3050000 },
-};
+	{
+	"8058_s3", 1800000, 1800000}, {
+	"8058_s2", 1300000, 1300000}, {
+"8058_l8", 2900000, 3050000},};
 
 static struct {
 	bool enabled;
 } bt_regs_status[] = {
-	{ false },
-	{ false },
-	{ false },
+	{false},
+	{false},
+	{false},
 };
+
 static struct regulator *bt_regs[ARRAY_SIZE(bt_regs_info)];
 
 static int bahama_bt(int on)
 {
 	int rc;
 	int i;
-	struct marimba config = { .mod_id =  SLAVE_ID_BAHAMA};
+	struct marimba config = {.mod_id = SLAVE_ID_BAHAMA };
 
 	struct bahama_variant_register {
 		const size_t size;
@@ -9959,86 +10986,85 @@ static int bahama_bt(int on)
 	u8 version;
 
 	const struct bahama_config_register v10_bt_on[] = {
-		{ 0xE9, 0x00, 0xFF },
-		{ 0xF4, 0x80, 0xFF },
-		{ 0xE4, 0x00, 0xFF },
-		{ 0xE5, 0x00, 0x0F },
+		{0xE9, 0x00, 0xFF},
+		{0xF4, 0x80, 0xFF},
+		{0xE4, 0x00, 0xFF},
+		{0xE5, 0x00, 0x0F},
 #ifdef CONFIG_WLAN
-		{ 0xE6, 0x38, 0x7F },
-		{ 0xE7, 0x06, 0xFF },
+		{0xE6, 0x38, 0x7F},
+		{0xE7, 0x06, 0xFF},
 #endif
-		{ 0xE9, 0x21, 0xFF },
-		{ 0x01, 0x0C, 0x1F },
-		{ 0x01, 0x08, 0x1F },
+		{0xE9, 0x21, 0xFF},
+		{0x01, 0x0C, 0x1F},
+		{0x01, 0x08, 0x1F},
 	};
 
 	const struct bahama_config_register v20_bt_on_fm_off[] = {
-		{ 0x11, 0x0C, 0xFF },
-		{ 0x13, 0x01, 0xFF },
-		{ 0xF4, 0x80, 0xFF },
-		{ 0xF0, 0x00, 0xFF },
-		{ 0xE9, 0x00, 0xFF },
+		{0x11, 0x0C, 0xFF},
+		{0x13, 0x01, 0xFF},
+		{0xF4, 0x80, 0xFF},
+		{0xF0, 0x00, 0xFF},
+		{0xE9, 0x00, 0xFF},
 #ifdef CONFIG_WLAN
-		{ 0x81, 0x00, 0x7F },
-		{ 0x82, 0x00, 0xFF },
-		{ 0xE6, 0x38, 0x7F },
-		{ 0xE7, 0x06, 0xFF },
+		{0x81, 0x00, 0x7F},
+		{0x82, 0x00, 0xFF},
+		{0xE6, 0x38, 0x7F},
+		{0xE7, 0x06, 0xFF},
 #endif
-		{ 0xE9, 0x21, 0xFF },
+		{0xE9, 0x21, 0xFF},
 	};
 
 	const struct bahama_config_register v20_bt_on_fm_on[] = {
-		{ 0x11, 0x0C, 0xFF },
-		{ 0x13, 0x01, 0xFF },
-		{ 0xF4, 0x86, 0xFF },
-		{ 0xF0, 0x06, 0xFF },
-		{ 0xE9, 0x00, 0xFF },
+		{0x11, 0x0C, 0xFF},
+		{0x13, 0x01, 0xFF},
+		{0xF4, 0x86, 0xFF},
+		{0xF0, 0x06, 0xFF},
+		{0xE9, 0x00, 0xFF},
 #ifdef CONFIG_WLAN
-		{ 0x81, 0x00, 0x7F },
-		{ 0x82, 0x00, 0xFF },
-		{ 0xE6, 0x38, 0x7F },
-		{ 0xE7, 0x06, 0xFF },
+		{0x81, 0x00, 0x7F},
+		{0x82, 0x00, 0xFF},
+		{0xE6, 0x38, 0x7F},
+		{0xE7, 0x06, 0xFF},
 #endif
-		{ 0xE9, 0x21, 0xFF },
+		{0xE9, 0x21, 0xFF},
 	};
 
 	const struct bahama_config_register v10_bt_off[] = {
-		{ 0xE9, 0x00, 0xFF },
+		{0xE9, 0x00, 0xFF},
 	};
 
 	const struct bahama_config_register v20_bt_off_fm_off[] = {
-		{ 0xF4, 0x84, 0xFF },
-		{ 0xF0, 0x04, 0xFF },
-		{ 0xE9, 0x00, 0xFF }
+		{0xF4, 0x84, 0xFF},
+		{0xF0, 0x04, 0xFF},
+		{0xE9, 0x00, 0xFF}
 	};
 
 	const struct bahama_config_register v20_bt_off_fm_on[] = {
-		{ 0xF4, 0x86, 0xFF },
-		{ 0xF0, 0x06, 0xFF },
-		{ 0xE9, 0x00, 0xFF }
+		{0xF4, 0x86, 0xFF},
+		{0xF0, 0x06, 0xFF},
+		{0xE9, 0x00, 0xFF}
 	};
 	const struct bahama_variant_register bt_bahama[2][3] = {
 		{
-			{ ARRAY_SIZE(v10_bt_off), v10_bt_off },
-			{ ARRAY_SIZE(v20_bt_off_fm_off), v20_bt_off_fm_off },
-			{ ARRAY_SIZE(v20_bt_off_fm_on), v20_bt_off_fm_on }
-		},
+		 {ARRAY_SIZE(v10_bt_off), v10_bt_off},
+		 {ARRAY_SIZE(v20_bt_off_fm_off), v20_bt_off_fm_off},
+		 {ARRAY_SIZE(v20_bt_off_fm_on), v20_bt_off_fm_on}
+		 },
 		{
-			{ ARRAY_SIZE(v10_bt_on), v10_bt_on },
-			{ ARRAY_SIZE(v20_bt_on_fm_off), v20_bt_on_fm_off },
-			{ ARRAY_SIZE(v20_bt_on_fm_on), v20_bt_on_fm_on }
-		}
+		 {ARRAY_SIZE(v10_bt_on), v10_bt_on},
+		 {ARRAY_SIZE(v20_bt_on_fm_off), v20_bt_on_fm_off},
+		 {ARRAY_SIZE(v20_bt_on_fm_on), v20_bt_on_fm_on}
+		 }
 	};
 
-	u8 offset = 0; /* index into bahama configs */
+	u8 offset = 0;		/* index into bahama configs */
 
 	on = on ? 1 : 0;
 	version = read_bahama_ver();
 
-	if (version ==  VER_UNSUPPORTED) {
+	if (version == VER_UNSUPPORTED) {
 		dev_err(&msm_bt_power_device.dev,
-			"%s: unsupported version\n",
-			__func__);
+			"%s: unsupported version\n", __func__);
 		return -EIO;
 	}
 
@@ -10051,7 +11077,7 @@ static int bahama_bt(int on)
 	if (on && (version == VER_2_0)) {
 		for (i = 0; i < ARRAY_SIZE(bt_regs_info); i++) {
 			if ((!strcmp(bt_regs_info[i].name, "8058_s2"))
-				&& (bt_regs_status[i].enabled == true)) {
+			    && (bt_regs_status[i].enabled == true)) {
 				if (regulator_disable(bt_regs[i])) {
 					dev_err(&msm_bt_power_device.dev,
 						"%s: regulator disable failed",
@@ -10066,25 +11092,24 @@ static int bahama_bt(int on)
 	p = bt_bahama[on][version + offset].set;
 
 	dev_info(&msm_bt_power_device.dev,
-		"%s: found version %d\n", __func__, version);
+		 "%s: found version %d\n", __func__, version);
 
 	for (i = 0; i < bt_bahama[on][version + offset].size; i++) {
-		u8 value = (p+i)->value;
+		u8 value = (p + i)->value;
 		rc = marimba_write_bit_mask(&config,
-			(p+i)->reg,
-			&value,
-			sizeof((p+i)->value),
-			(p+i)->mask);
+					    (p + i)->reg,
+					    &value,
+					    sizeof((p + i)->value),
+					    (p + i)->mask);
 		if (rc < 0) {
 			dev_err(&msm_bt_power_device.dev,
 				"%s: reg %d write failed: %d\n",
-				__func__, (p+i)->reg, rc);
+				__func__, (p + i)->reg, rc);
 			return rc;
 		}
 		dev_dbg(&msm_bt_power_device.dev,
 			"%s: reg 0x%02x write value 0x%02x mask 0x%02x\n",
-				__func__, (p+i)->reg,
-				value, (p+i)->mask);
+			__func__, (p + i)->reg, value, (p + i)->mask);
 	}
 	/* Update BT Status */
 	if (on)
@@ -10102,7 +11127,7 @@ static int bluetooth_use_regulators(int on)
 	for (i = 0; i < ARRAY_SIZE(bt_regs_info); i++) {
 		bt_regs[i] = on ? regulator_get(&msm_bt_power_device.dev,
 						bt_regs_info[i].name) :
-				(regulator_put(bt_regs[i]), NULL);
+		    (regulator_put(bt_regs[i]), NULL);
 		if (IS_ERR(bt_regs[i])) {
 			rc = PTR_ERR(bt_regs[i]);
 			dev_err(&msm_bt_power_device.dev,
@@ -10117,8 +11142,8 @@ static int bluetooth_use_regulators(int on)
 			continue;
 
 		rc = regulator_set_voltage(bt_regs[i],
-					  bt_regs_info[i].vmin,
-					  bt_regs_info[i].vmax);
+					   bt_regs_info[i].vmin,
+					   bt_regs_info[i].vmax);
 		if (rc < 0) {
 			dev_err(&msm_bt_power_device.dev,
 				"regulator %s voltage set (%d)\n",
@@ -10147,13 +11172,11 @@ static int bluetooth_switch_regulators(int on)
 			if (rc < 0) {
 				dev_err(&msm_bt_power_device.dev,
 					"regulator %s %s failed (%d)\n",
-					bt_regs_info[i].name,
-					"enable", rc);
+					bt_regs_info[i].name, "enable", rc);
 				if (i > 0) {
 					while (--i) {
 						regulator_disable(bt_regs[i]);
-						bt_regs_status[i].enabled
-								 = false;
+						bt_regs_status[i].enabled = false;
 					}
 					break;
 				}
@@ -10164,8 +11187,7 @@ static int bluetooth_switch_regulators(int on)
 			if (rc < 0) {
 				dev_err(&msm_bt_power_device.dev,
 					"regulator %s %s failed (%d)\n",
-					bt_regs_info[i].name,
-					"disable", rc);
+					bt_regs_info[i].name, "disable", rc);
 				break;
 			}
 			bt_regs_status[i].enabled = false;
@@ -10185,7 +11207,7 @@ static int bluetooth_power(int on)
 	id = adie_get_detected_connectivity_type();
 	if (id != BAHAMA_ID) {
 		pr_err("%s: unexpected adie connectivity type: %d\n",
-			__func__, id);
+		       __func__, id);
 		return -ENODEV;
 	}
 
@@ -10234,7 +11256,7 @@ static int bluetooth_power(int on)
 		/* avoid calling i2c and regulator before unblock (on) */
 		if (platform_get_drvdata(&msm_bt_power_device) == NULL) {
 			dev_info(&msm_bt_power_device.dev,
-				"%s: initialized OFF/blocked\n", __func__);
+				 "%s: initialized OFF/blocked\n", __func__);
 			goto out;
 		}
 
@@ -10254,19 +11276,17 @@ out:
 	if (rc < 0)
 		on = 0;
 	dev_info(&msm_bt_power_device.dev,
-		"Bluetooth power switch: state %d result %d\n", on, rc);
+		 "Bluetooth power switch: state %d result %d\n", on, rc);
 
 	return rc;
 }
 
-#endif /*CONFIG_MARIMBA_CORE, CONFIG_MSM_BT_POWER, CONFIG_MSM_BT_POWER_MODULE*/
+#endif /*CONFIG_MARIMBA_CORE, CONFIG_MSM_BT_POWER, CONFIG_MSM_BT_POWER_MODULE */
 
 static void __init msm8x60_cfg_smsc911x(void)
 {
-	smsc911x_resources[1].start =
-		PM8058_GPIO_IRQ(PM8058_IRQ_BASE, 6);
-	smsc911x_resources[1].end =
-		PM8058_GPIO_IRQ(PM8058_IRQ_BASE, 6);
+	smsc911x_resources[1].start = PM8058_GPIO_IRQ(PM8058_IRQ_BASE, 6);
+	smsc911x_resources[1].end = PM8058_GPIO_IRQ(PM8058_IRQ_BASE, 6);
 }
 
 void msm_fusion_setup_pinctrl(void)
@@ -10276,8 +11296,8 @@ void msm_fusion_setup_pinctrl(void)
 	if (socinfo_get_platform_subtype() == 0x3) {
 		/*
 		 * Vote for the A1 clock to be in pin control mode before
-		* the external images are loaded.
-		*/
+		 * the external images are loaded.
+		 */
 		a1 = msm_xo_get(MSM_XO_TCXO_A1, "mdm");
 		BUG_ON(!a1);
 		msm_xo_mode_vote(a1, MSM_XO_MODE_PIN_CTRL);
@@ -10320,14 +11340,18 @@ static struct msm_board_data msm8x60_dragon_board_data __initdata = {
 	.gpiomux_cfgs = msm8x60_dragon_gpiomux_cfgs,
 };
 
+static struct msm_board_data mione_board_data __initdata = {
+	.gpiomux_cfgs = mione_gpiomux_cfgs,
+};
+
 static void __init msm8x60_init(struct msm_board_data *board_data)
 {
 	uint32_t soc_platform_version;
 #ifdef CONFIG_USB_EHCI_MSM_72K
 	struct pm8xxx_mpp_config_data hsusb_phy_mpp = {
-		.type		= PM8XXX_MPP_TYPE_D_OUTPUT,
-		.level		= PM8901_MPP_DIG_LEVEL_L5,
-		.control	= PM8XXX_MPP_DOUT_CTRL_HIGH,
+		.type = PM8XXX_MPP_TYPE_D_OUTPUT,
+		.level = PM8901_MPP_DIG_LEVEL_L5,
+		.control = PM8XXX_MPP_DOUT_CTRL_HIGH,
 	};
 #endif
 	pmic_reset_irq = PM8058_IRQ_BASE + PM8058_RESOUT_IRQ;
@@ -10346,7 +11370,7 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	/* Change SPM handling of core 1 if PMM 8160 is present. */
 	soc_platform_version = socinfo_get_platform_version();
 	if (SOCINFO_VERSION_MAJOR(soc_platform_version) == 1 &&
-			SOCINFO_VERSION_MINOR(soc_platform_version) >= 2) {
+	    SOCINFO_VERSION_MINOR(soc_platform_version) >= 2) {
 		struct msm_spm_platform_data *spm_data;
 
 		spm_data = &msm_spm_data_v1[1];
@@ -10377,11 +11401,11 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 
 		for (i = 0; i < ARRAY_SIZE(rpm_regulator_init_data); i++)
 			if (rpm_regulator_init_data[i].id
-				== RPM_VREG_ID_PM8901_L4
+			    == RPM_VREG_ID_PM8901_L4
 			    || rpm_regulator_init_data[i].id
-				== RPM_VREG_ID_PM8901_L6)
+			    == RPM_VREG_ID_PM8901_L6)
 				rpm_regulator_init_data[i]
-					.init_data.constraints.always_on = 1;
+				    .init_data.constraints.always_on = 1;
 	}
 
 	/*
@@ -10406,10 +11430,10 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	 * it disabled for all others for additional power savings.
 	 */
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() ||
-			machine_is_msm8x60_rumi3() ||
-			machine_is_msm8x60_sim() ||
-			machine_is_msm8x60_fluid() ||
-			machine_is_msm8x60_dragon())
+	    machine_is_msm8x60_rumi3() ||
+	    machine_is_msm8x60_sim() ||
+	    machine_is_msm8x60_fluid() ||
+	    machine_is_msm8x60_dragon() || machine_is_mione())
 		msm8x60_init_ebi2();
 	msm8x60_init_tlmm();
 	msm8x60_init_gpiomux(board_data->gpiomux_cfgs);
@@ -10419,7 +11443,6 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 #endif
 	msm8x60_init_mmc();
 
-
 #if defined(CONFIG_PMIC8058_OTHC) || defined(CONFIG_PMIC8058_OTHC_MODULE)
 	msm8x60_init_pm8058_othc();
 #endif
@@ -10428,6 +11451,8 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 		pm8058_platform_data.keypad_pdata = &fluid_keypad_data;
 	else if (machine_is_msm8x60_dragon())
 		pm8058_platform_data.keypad_pdata = &dragon_keypad_data;
+	else if (machine_is_mione())
+		pm8058_platform_data.keypad_pdata = &mione_keypad_data;
 	else
 		pm8058_platform_data.keypad_pdata = &ffa_keypad_data;
 #if !defined(CONFIG_MSM_CAMERA_V4L2) && defined(CONFIG_WEBCAM_OV9726)
@@ -10439,8 +11464,9 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 #endif
 #ifdef CONFIG_BATTERY_MSM8X60
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() ||
-		machine_is_msm8x60_fusion() || machine_is_msm8x60_dragon() ||
-		machine_is_msm8x60_fusn_ffa() || machine_is_msm8x60_fluid())
+	    machine_is_msm8x60_fusion() || machine_is_msm8x60_dragon() ||
+	    machine_is_msm8x60_fusn_ffa() || machine_is_msm8x60_fluid() ||
+	    machine_is_mione())
 		platform_device_register(&msm_charger_device);
 #endif
 
@@ -10454,23 +11480,25 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 		pm8058_platform_data.leds_pdata = &pm8058_fluid_flash_leds_data;
 	else if (machine_is_msm8x60_dragon())
 		pm8058_platform_data.leds_pdata = &pm8058_dragon_leds_data;
+	else if (machine_is_mione())
+		pm8058_platform_data.leds_pdata = &pm8058_mione_pwm_leds_data;
 	else
 		pm8058_platform_data.leds_pdata = &pm8058_flash_leds_data;
 
 	if (machine_is_msm8x60_ffa() || machine_is_msm8x60_fusn_ffa() ||
-		machine_is_msm8x60_dragon()) {
+	    machine_is_msm8x60_dragon()) {
 		pm8058_platform_data.vibrator_pdata = &pm8058_vib_pdata;
 	}
 
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() ||
 	    machine_is_msm8x60_fluid() || machine_is_msm8x60_fusion() ||
-	    machine_is_msm8x60_fusn_ffa() || machine_is_msm8x60_dragon()) {
+	    machine_is_msm8x60_fusn_ffa() || machine_is_msm8x60_dragon() ||
+	    machine_is_mione()) {
 		msm8x60_cfg_smsc911x();
 		if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) != 1)
 			platform_add_devices(msm8660_footswitch,
 					     msm8660_num_footswitch);
-		platform_add_devices(surf_devices,
-				     ARRAY_SIZE(surf_devices));
+		platform_add_devices(surf_devices, ARRAY_SIZE(surf_devices));
 
 #ifdef CONFIG_MSM_DSPS
 		if (machine_is_msm8x60_fluid()) {
@@ -10479,28 +11507,29 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 		}
 #endif
 
-	pm8901_vreg_mpp0_init();
+		pm8901_vreg_mpp0_init();
 
-	platform_device_register(&msm8x60_8901_mpp_vreg);
+		platform_device_register(&msm8x60_8901_mpp_vreg);
 
 #ifdef CONFIG_USB_EHCI_MSM_72K
-	/*
-	 * Drive MPP2 pin HIGH for PHY to generate ID interrupts on 8660
-	 * fluid
-	 */
-	if (machine_is_msm8x60_fluid())
-		pm8xxx_mpp_config(PM8901_MPP_PM_TO_SYS(1), &hsusb_phy_mpp);
-	msm_add_host(0, &msm_usb_host_pdata);
+		/*
+		 * Drive MPP2 pin HIGH for PHY to generate ID interrupts on 8660
+		 * fluid
+		 */
+		if (machine_is_msm8x60_fluid())
+			pm8xxx_mpp_config(PM8901_MPP_PM_TO_SYS(1),
+					  &hsusb_phy_mpp);
+		msm_add_host(0, &msm_usb_host_pdata);
 #endif
 
 #ifdef CONFIG_SND_SOC_MSM8660_APQ
 		if (machine_is_msm8x60_dragon())
 			platform_add_devices(dragon_alsa_devices,
-					ARRAY_SIZE(dragon_alsa_devices));
+					     ARRAY_SIZE(dragon_alsa_devices));
 		else
 #endif
 			platform_add_devices(asoc_devices,
-					ARRAY_SIZE(asoc_devices));
+					     ARRAY_SIZE(asoc_devices));
 	} else {
 		msm8x60_configure_smc91x();
 		platform_add_devices(rumi_sim_devices,
@@ -10508,13 +11537,12 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	}
 #if defined(CONFIG_USB_PEHCI_HCD) || defined(CONFIG_USB_PEHCI_HCD_MODULE)
 	if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() ||
-		machine_is_msm8x60_dragon())
+	    machine_is_msm8x60_dragon() || machine_is_mione())
 		msm8x60_cfg_isp1763();
 #endif
 
 	if (machine_is_msm8x60_fusion() || machine_is_msm8x60_fusn_ffa())
 		platform_add_devices(charm_devices, ARRAY_SIZE(charm_devices));
-
 
 #if defined(CONFIG_SPI_QUP) || defined(CONFIG_SPI_QUP_MODULE)
 	if (machine_is_msm8x60_fluid())
@@ -10534,8 +11562,7 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	register_i2c_devices();
 
 	if (machine_is_msm8x60_dragon())
-		smsc911x_config.reset_gpio
-			= GPIO_ETHERNET_RESET_N_DRAGON;
+		smsc911x_config.reset_gpio = GPIO_ETHERNET_RESET_N_DRAGON;
 
 	platform_device_register(&smsc911x_device);
 
@@ -10548,19 +11575,22 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 #ifdef CONFIG_FB_MSM_LCDC_SAMSUNG_OLED_PT
 		if (SOCINFO_VERSION_MAJOR(soc_platform_version) < 3) {
 			spi_register_board_info(lcdc_samsung_spi_board_info,
-				ARRAY_SIZE(lcdc_samsung_spi_board_info));
+						ARRAY_SIZE
+						(lcdc_samsung_spi_board_info));
 		} else
 #endif
 		{
 #ifdef CONFIG_FB_MSM_LCDC_AUO_WVGA
 			spi_register_board_info(lcdc_auo_spi_board_info,
-				ARRAY_SIZE(lcdc_auo_spi_board_info));
+						ARRAY_SIZE
+						(lcdc_auo_spi_board_info));
 #endif
 		}
 #ifdef CONFIG_FB_MSM_LCDC_NT35582_WVGA
 	} else if (machine_is_msm8x60_dragon()) {
 		spi_register_board_info(lcdc_nt35582_spi_board_info,
-			ARRAY_SIZE(lcdc_nt35582_spi_board_info));
+					ARRAY_SIZE
+					(lcdc_nt35582_spi_board_info));
 #endif
 	}
 #endif
@@ -10641,6 +11671,11 @@ static void __init msm8x60_dragon_init(void)
 	msm8x60_init(&msm8x60_dragon_board_data);
 }
 
+static void __init mione_init(void)
+{
+	msm8x60_init(&mione_board_data);
+}
+
 MACHINE_START(MSM8X60_RUMI3, "QCT MSM8X60 RUMI3")
 	.map_io = msm8x60_map_io,
 	.reserve = msm8x60_reserve,
@@ -10686,11 +11721,11 @@ MACHINE_START(MSM8X60_FFA, "QCT MSM8X60 FFA")
 MACHINE_END
 
 MACHINE_START(MSM8X60_FLUID, "QCT MSM8X60 FLUID")
-	.map_io = msm8x60_map_io,
+.map_io = msm8x60_map_io,
 	.reserve = msm8x60_reserve,
 	.init_irq = msm8x60_init_irq,
 	.handle_irq = gic_handle_irq,
-	.init_machine = msm8x60_fluid_init,
+.init_machine = msm8x60_fluid_init,
 	.timer = &msm_timer,
 	.init_early = msm8x60_charm_init_early,
 	.restart = msm_restart,
@@ -10724,6 +11759,17 @@ MACHINE_START(MSM8X60_DRAGON, "QCT MSM8X60 DRAGON")
 	.init_irq = msm8x60_init_irq,
 	.handle_irq = gic_handle_irq,
 	.init_machine = msm8x60_dragon_init,
+	.timer = &msm_timer,
+	.init_early = msm8x60_charm_init_early,
+	.restart = msm_restart,
+MACHINE_END
+
+MACHINE_START(MIONE, "MIONE")
+	.map_io = msm8x60_map_io,
+	.reserve = msm8x60_reserve,
+	.init_irq = msm8x60_init_irq,
+	.handle_irq = gic_handle_irq,
+	.init_machine = mione_init,
 	.timer = &msm_timer,
 	.init_early = msm8x60_charm_init_early,
 	.restart = msm_restart,

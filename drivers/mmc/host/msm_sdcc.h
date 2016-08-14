@@ -417,6 +417,10 @@ struct msmsdcc_host {
 	struct device_attribute	polling;
 	struct device_attribute idle_timeout;
 	struct device_attribute auto_cmd19_attr;
+
+#define LAST_CMD_CNT 10
+	u32 last_cmds[LAST_CMD_CNT][2];
+	unsigned int last_cmd_index;
 };
 
 #define MSMSDCC_VERSION_MASK	0xFFFF

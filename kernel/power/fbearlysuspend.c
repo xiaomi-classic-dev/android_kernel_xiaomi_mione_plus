@@ -40,13 +40,15 @@ static void stop_drawing_early_suspend(struct early_suspend *h)
 	fb_state = FB_STATE_REQUEST_STOP_DRAWING;
 	spin_unlock_irqrestore(&fb_state_lock, irq_flags);
 
-	wake_up_all(&fb_state_wq);
-	ret = wait_event_timeout(fb_state_wq,
-				 fb_state == FB_STATE_STOPPED_DRAWING,
-				 HZ);
-	if (unlikely(fb_state != FB_STATE_STOPPED_DRAWING))
-		pr_warning("stop_drawing_early_suspend: timeout waiting for "
-			   "userspace to stop drawing\n");
+	if (waitqueue_active(&fb_state_wq)) {
+		wake_up_all(&fb_state_wq);
+		ret = wait_event_timeout(fb_state_wq,
+					 fb_state == FB_STATE_STOPPED_DRAWING,
+					 HZ);
+		if (unlikely(fb_state != FB_STATE_STOPPED_DRAWING))
+			pr_warning("stop_drawing_early_suspend: timeout waiting for "
+				   "userspace to stop drawing\n");
+	}
 }
 
 /* tell userspace to start drawing */
