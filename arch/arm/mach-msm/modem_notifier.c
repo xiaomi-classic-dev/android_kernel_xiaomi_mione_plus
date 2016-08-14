@@ -22,6 +22,7 @@
 #include <linux/workqueue.h>
 
 #include "modem_notifier.h"
+#include "smd_private.h"
 
 #define DEBUG
 
@@ -169,6 +170,7 @@ static int modem_notifier_test_call(struct notifier_block *this,
 	switch (code) {
 	case MODEM_NOTIFIER_START_RESET:
 		printk(KERN_ERR "Notify: start reset\n");
+		smd_diag();
 		break;
 	case MODEM_NOTIFIER_END_RESET:
 		printk(KERN_ERR "Notify: end reset\n");

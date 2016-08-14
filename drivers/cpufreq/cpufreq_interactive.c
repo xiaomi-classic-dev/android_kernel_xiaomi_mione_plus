@@ -231,6 +231,9 @@ static void cpufreq_interactive_timer(unsigned long data)
 
 	new_freq = pcpu->freq_table[index].frequency;
 
+	if (pcpu->target_freq == new_freq && pcpu->target_freq == pcpu->policy->cur)
+		goto rearm_if_notmax;
+
 	/*
 	 * Do not scale below floor_freq unless we have been at or above the
 	 * floor frequency for the minimum sample time since last validated.

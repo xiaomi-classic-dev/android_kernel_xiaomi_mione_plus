@@ -24,7 +24,8 @@ static struct gpiomux_setting *msm_gpiomux_sets;
 static unsigned msm_gpiomux_ngpio;
 
 int msm_gpiomux_write(unsigned gpio, enum msm_gpiomux_setting which,
-	struct gpiomux_setting *setting, struct gpiomux_setting *old_setting)
+		      struct gpiomux_setting *setting,
+		      struct gpiomux_setting *old_setting)
 {
 	struct msm_gpiomux_rec *rec = msm_gpiomux_recs + gpio;
 	unsigned set_slot = gpio * GPIOMUX_NSETTINGS + which;
@@ -44,7 +45,7 @@ int msm_gpiomux_write(unsigned gpio, enum msm_gpiomux_setting which,
 		if (rec->sets[which] == NULL)
 			status = 1;
 		else
-			*old_setting =  *(rec->sets[which]);
+			*old_setting = *(rec->sets[which]);
 	}
 
 	if (setting) {
@@ -55,13 +56,14 @@ int msm_gpiomux_write(unsigned gpio, enum msm_gpiomux_setting which,
 	}
 
 	new_set = rec->ref ? rec->sets[GPIOMUX_ACTIVE] :
-		rec->sets[GPIOMUX_SUSPENDED];
+	    rec->sets[GPIOMUX_SUSPENDED];
 	if (new_set)
 		__msm_gpiomux_write(gpio, *new_set);
 
 	spin_unlock_irqrestore(&gpiomux_lock, irq_flags);
 	return status;
 }
+
 EXPORT_SYMBOL(msm_gpiomux_write);
 
 int msm_gpiomux_get(unsigned gpio)
@@ -81,6 +83,7 @@ int msm_gpiomux_get(unsigned gpio)
 	spin_unlock_irqrestore(&gpiomux_lock, irq_flags);
 	return 0;
 }
+
 EXPORT_SYMBOL(msm_gpiomux_get);
 
 int msm_gpiomux_put(unsigned gpio)
@@ -101,6 +104,7 @@ int msm_gpiomux_put(unsigned gpio)
 	spin_unlock_irqrestore(&gpiomux_lock, irq_flags);
 	return 0;
 }
+
 EXPORT_SYMBOL(msm_gpiomux_put);
 
 int msm_gpiomux_init(size_t ngpio)
@@ -120,7 +124,7 @@ int msm_gpiomux_init(size_t ngpio)
 	 * installing settings on top of it.
 	 */
 	msm_gpiomux_sets = kmalloc(sizeof(struct gpiomux_setting) * ngpio *
-		GPIOMUX_NSETTINGS, GFP_KERNEL);
+				   GPIOMUX_NSETTINGS, GFP_KERNEL);
 	if (!msm_gpiomux_sets) {
 		kfree(msm_gpiomux_recs);
 		msm_gpiomux_recs = NULL;
@@ -131,6 +135,7 @@ int msm_gpiomux_init(size_t ngpio)
 
 	return 0;
 }
+
 EXPORT_SYMBOL(msm_gpiomux_init);
 
 void msm_gpiomux_install(struct msm_gpiomux_config *configs, unsigned nconfigs)
@@ -141,10 +146,11 @@ void msm_gpiomux_install(struct msm_gpiomux_config *configs, unsigned nconfigs)
 	for (c = 0; c < nconfigs; ++c) {
 		for (s = 0; s < GPIOMUX_NSETTINGS; ++s) {
 			rc = msm_gpiomux_write(configs[c].gpio, s,
-				configs[c].settings[s], NULL);
+					       configs[c].settings[s], NULL);
 			if (rc)
 				pr_err("%s: write failure: %d\n", __func__, rc);
 		}
 	}
 }
+
 EXPORT_SYMBOL(msm_gpiomux_install);

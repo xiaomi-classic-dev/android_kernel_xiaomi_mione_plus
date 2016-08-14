@@ -465,6 +465,21 @@ config MMC_MSM
 	  This provides support for the SD/MMC cell found in the
           MSM and QSD SOCs from Qualcomm.
 
+config MMC_MSM_CARD_HW_DETECTION
+	boolean "Qualcomm MMC Hardware detection support"
+	depends on MMC_MSM
+	default n
+	help
+	  Select Y if the hardware has support to detect card insertion/removal.
+
+config MMC_MSM_CARD_HW_DETECT_NO_DEFAULT_STATE
+	boolean "Qualcomm MMC Hardware detection pin has no default state"
+	depends on MMC_MSM_CARD_HW_DETECTION
+	default n
+	help
+	  Select Y if the card detection pin 's default state could change
+          across different H/W.
+
 config MMC_MSM_SDC1_SUPPORT
 	boolean "Qualcomm SDC1 support"
 	depends on MMC_MSM
