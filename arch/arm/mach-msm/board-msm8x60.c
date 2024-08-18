@@ -52,6 +52,8 @@
 #include <linux/proc_fs.h>
 #include <linux/clk.h>
 
+#include <mach/board_mione.h>
+
 #ifdef CONFIG_ANDROID_PMEM
 #include <linux/android_pmem.h>
 #endif
@@ -6239,6 +6241,7 @@ static void __init msm8x60_reserve(void)
 	msm8x60_set_display_params(prim_panel_name, ext_panel_name);
 	reserve_info = &msm8x60_reserve_info;
 	msm_reserve();
+	mione_reserve();
 }
 
 #define EXT_CHG_VALID_MPP 10
@@ -11307,6 +11310,7 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 	    machine_is_msm8x60_fusn_ffa() || machine_is_msm8x60_dragon() ||
 	    machine_is_mione()) {
 		msm8x60_cfg_smsc911x();
+		mione_add_ramconsole_devices();
 		if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) != 1)
 			platform_add_devices(msm8660_footswitch,
 					     msm8660_num_footswitch);
