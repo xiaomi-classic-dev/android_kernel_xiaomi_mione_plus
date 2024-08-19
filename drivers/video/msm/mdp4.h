@@ -489,6 +489,10 @@ static inline void mdp4_dtv_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe)
 {
 	/* empty */
 }
+static inline int mdp4_dtv_pipe_commit(void)
+{
+	return 0;
+}
 static inline void mdp4_overlay_dtv_start(void)
 {
 	/* empty */

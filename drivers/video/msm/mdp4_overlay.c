@@ -3568,17 +3568,17 @@ int mdp4_overlay_commit(struct fb_info *info)
 	if (mixer == MDP4_MIXER0) {
 		if (ctrl->panel_mode & MDP4_PANEL_DSI_CMD) {
 			/* cndx = 0 */
-			mdp4_dsi_cmd_pipe_commit(0, 1);
+			mdp4_dsi_cmd_pipe_commit();
 		} else if (ctrl->panel_mode & MDP4_PANEL_DSI_VIDEO) {
 			/* cndx = 0 */
-			mdp4_dsi_video_pipe_commit(0, 1);
+			mdp4_dsi_video_pipe_commit();
 		} else if (ctrl->panel_mode & MDP4_PANEL_LCDC) {
 			/* cndx = 0 */
-			mdp4_lcdc_pipe_commit(0, 1);
+			mdp4_lcdc_pipe_commit();
 		}
 	} else if (mixer == MDP4_MIXER1) {
 		if (ctrl->panel_mode & MDP4_PANEL_DTV)
-			mdp4_dtv_pipe_commit(0, 1);
+			mdp4_dtv_pipe_commit();
 	}
 	msm_fb_signal_timeline(mfd);
 
