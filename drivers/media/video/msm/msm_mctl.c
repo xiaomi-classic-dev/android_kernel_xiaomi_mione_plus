@@ -20,6 +20,7 @@
 #include <linux/videodev2.h>
 #include <linux/proc_fs.h>
 #include <linux/vmalloc.h>
+#include <linux/vmalloc.h>
 
 #include <media/v4l2-dev.h>
 #include <media/v4l2-ioctl.h>
@@ -1002,6 +1003,10 @@ static int msm_mctl_dev_close(struct file *f)
 	}
 	pcam_inst->streamon = 0;
 	pcam->mctl_node.dev_inst_map[pcam_inst->image_mode] = NULL;
+}
+	}
+
+>>>>>>> Revert "msm: camera: Enable AVTimer related APIs"
 	if (pcam_inst->vbqueue_initialized)
 		vb2_queue_release(&pcam_inst->vid_bufq);
 	D("%s Closing down instance %p ", __func__, pcam_inst);
@@ -1109,6 +1114,9 @@ static int msm_mctl_v4l2_s_ctrl(struct file *f, void *pctx,
 				pcam_inst->plane_info.num_planes,
 				pcam_inst->plane_info.plane[0].size,
 				pcam_inst->plane_info.plane[1].size);
+}
+		pcam_inst->p_avtimer_msw = ioremap(AVTIMER_MSW_PHY_ADDR, 4);
+>>>>>>> Revert "msm: camera: Enable AVTimer related APIs"
 	} else
 		pr_err("%s Unsupported S_CTRL Value ", __func__);
 
