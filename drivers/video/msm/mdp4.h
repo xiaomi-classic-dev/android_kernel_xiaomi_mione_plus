@@ -495,10 +495,6 @@ void mdp4_dtv_base_swap(int cndx, struct mdp4_overlay_pipe *pipe);
 void mdp4_dtv_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe);
 int mdp4_dtv_pipe_commit(int cndx, int wait);
 #else
-static inline void mdp4_dtv_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe)
-{
-	/* empty */
-}
 static inline void mdp4_overlay_dtv_start(void)
 {
 	/* empty */

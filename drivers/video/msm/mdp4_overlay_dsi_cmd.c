@@ -30,6 +30,7 @@
 #include "msm_fb.h"
 #include "mipi_dsi.h"
 #include "mdp4.h"
+static atomic_t in_drawing;
 
 static int vsync_start_y_adjust = 4;
 
