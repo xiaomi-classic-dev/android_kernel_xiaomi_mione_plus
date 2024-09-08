@@ -34,6 +34,12 @@
 #define ISA1200_HCTRL5_VIB_STRT	0xD5
 #define ISA1200_HCTRL5_VIB_STOP	0x6B
 #define ISA1200_POWER_DOWN_MASK 0x7F
+#define ISA1200_OVERDRIVE_LH    0x20
+#define ISA1200_OVERDRIVE_EN    0x40
+
+#define PAT_MAX_LEN 256
+unsigned char pattern[PAT_MAX_LEN];
+unsigned char cdbgstr[PAT_MAX_LEN];
 
 struct isa1200_chip {
 	struct i2c_client *client;
@@ -43,6 +49,7 @@ struct isa1200_chip {
 	struct timed_output_dev dev;
 	struct work_struct work;
 	spinlock_t lock;
+	struct mutex vib_lock;
 	unsigned int enable;
 	unsigned int period_ns;
 	bool is_len_gpio_valid;
@@ -50,6 +57,13 @@ struct isa1200_chip {
 	bool clk_on;
 	u8 hctrl0_val;
 	struct clk *pwm_clk;
+
+	struct work_struct pat_work;
+	struct workqueue_struct *hap_wq;
+	unsigned char *pat;
+	int pat_len;
+	int pat_i;
+	int pat_mode;
 };
 
 static int isa1200_read_reg(struct i2c_client *client, int reg)
@@ -78,6 +92,8 @@ static void isa1200_vib_set(struct isa1200_chip *haptic, int enable)
 {
 	int rc = 0;
 
+	mutex_lock(&haptic->vib_lock);
+
 	if (enable) {
 		/* if hen and len are seperate then enable hen
 		 * otherwise set normal mode bit */
@@ -88,7 +104,7 @@ static void isa1200_vib_set(struct isa1200_chip *haptic, int enable)
 				haptic->hctrl0_val | ~ISA1200_POWER_DOWN_MASK);
 			if (rc < 0) {
 				pr_err("%s: i2c write failure\n", __func__);
-				return;
+				goto vib_done;
 			}
 		}
 
@@ -108,6 +124,7 @@ static void isa1200_vib_set(struct isa1200_chip *haptic, int enable)
 				pr_err("%s: pwm_enable fail\n", __func__);
 				goto chip_dwn;
 			}
+			gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 1);
 		} else if (haptic->pdata->mode_ctrl == PWM_GEN_MODE) {
 			/* check for board specific clk callback */
 			if (haptic->pdata->clk_enable) {
@@ -148,7 +165,7 @@ static void isa1200_vib_set(struct isa1200_chip *haptic, int enable)
 				haptic->hctrl0_val & ISA1200_POWER_DOWN_MASK);
 			if (rc < 0) {
 				pr_err("%s: i2c write failure\n", __func__);
-				return;
+				goto vib_done;
 			}
 		}
 
@@ -176,7 +193,7 @@ static void isa1200_vib_set(struct isa1200_chip *haptic, int enable)
 		}
 	}
 
-	return;
+	goto vib_done;
 
 dis_clk:
 	if (haptic->pdata->need_pwm_clk && haptic->clk_on) {
@@ -199,6 +216,77 @@ chip_dwn:
 			haptic->hctrl0_val & ISA1200_POWER_DOWN_MASK);
 		if (rc < 0) {
 			pr_err("%s: i2c write failure\n", __func__);
+		}
+	}
+vib_done:
+	mutex_unlock(&haptic->vib_lock);
+}
+
+static void isa1200_vib_set_pat(struct isa1200_chip *haptic, int level)
+{
+	int rc = 0;
+	unsigned int hctrl0 = haptic->hctrl0_val;
+	int period_us = haptic->period_ns / 1000;
+
+	if (level != 0) {
+
+		if (level > 0)
+			hctrl0 |= ISA1200_OVERDRIVE_LH;
+		else
+			hctrl0 &= ~ISA1200_OVERDRIVE_LH;
+
+		if (abs(level) > 125)
+			hctrl0 |= ISA1200_OVERDRIVE_EN;
+		else
+			hctrl0 &= ~ISA1200_OVERDRIVE_EN;
+
+		rc = isa1200_write_reg(haptic->client, ISA1200_HCTRL0, hctrl0);
+		if (rc < 0) {
+			pr_err("%s: i2c write failure\n", __func__);
+			return;
+		}
+
+		rc = pwm_config(haptic->pwm,
+				(period_us * (level + 128)) / 256, period_us);
+		if (rc < 0) {
+			pr_err("%s: pwm_config fail\n", __func__);
+			goto chip_dwn;
+		}
+
+		rc = pwm_enable(haptic->pwm);
+		if (rc < 0) {
+			pr_err("%s: pwm_enable fail\n", __func__);
+			goto chip_dwn;
+		}
+		if (haptic->is_len_gpio_valid == true)
+			gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 1);
+	} else {
+		if (haptic->is_len_gpio_valid == true)
+			gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 0);
+
+		pwm_disable(haptic->pwm);
+
+		/* restore HCTRL0 register at disable */
+		rc = isa1200_write_reg(haptic->client, ISA1200_HCTRL0,
+				       haptic->hctrl0_val);
+		if (rc < 0) {
+			pr_err("%s: i2c write failure\n", __func__);
+			return;
+		}
+
+	}
+
+	return;
+
+chip_dwn:
+	if (haptic->is_len_gpio_valid == true)
+		gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 0);
+	else {
+		rc = isa1200_write_reg(haptic->client, ISA1200_HCTRL0,
+				       haptic->
+				       hctrl0_val & ISA1200_POWER_DOWN_MASK);
+		if (rc < 0) {
+			pr_err("%s: i2c write failure\n", __func__);
 			return;
 		}
 	}
@@ -210,6 +298,22 @@ static void isa1200_chip_work(struct work_struct *work)
 
 	haptic = container_of(work, struct isa1200_chip, work);
 	isa1200_vib_set(haptic, haptic->enable);
+}
+
+static void isa1200_pat_work(struct work_struct *work)
+{
+	struct isa1200_chip *haptic;
+	int i;
+	int level;
+
+	haptic = container_of(work, struct isa1200_chip, pat_work);
+	for (i = 1; i < haptic->pat_len; i += 2) {
+		level = (signed char)haptic->pat[i];
+		isa1200_vib_set_pat(haptic, level);
+		pr_debug("%s: vib:%d time:%d", __func__, level,
+			 haptic->pat[i + 1]);
+		msleep(haptic->pat[i + 1]);
+	}
 }
 
 static void isa1200_chip_enable(struct timed_output_dev *dev, int value)
@@ -230,8 +334,8 @@ static void isa1200_chip_enable(struct timed_output_dev *dev, int value)
 			ktime_set(value / 1000, (value % 1000) * 1000000),
 			HRTIMER_MODE_REL);
 	}
-	spin_unlock_irqrestore(&haptic->lock, flags);
 	schedule_work(&haptic->work);
+	spin_unlock_irqrestore(&haptic->lock, flags);
 }
 
 static int isa1200_chip_get_time(struct timed_output_dev *dev)
@@ -259,10 +363,14 @@ static enum hrtimer_restart isa1200_vib_timer_func(struct hrtimer *timer)
 
 static void dump_isa1200_reg(char *str, struct i2c_client *client)
 {
-	pr_debug("%s reg0x%x=0x%x, reg0x%x=0x%x, reg0x%x=0x%x\n", str,
-		ISA1200_HCTRL0, isa1200_read_reg(client, ISA1200_HCTRL0),
-		ISA1200_HCTRL1, isa1200_read_reg(client, ISA1200_HCTRL1),
-		ISA1200_HCTRL5, isa1200_read_reg(client, ISA1200_HCTRL5));
+	pr_debug("%s 0x%x   0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n", str,
+		 isa1200_read_reg(client, 0x00),
+		 isa1200_read_reg(client, ISA1200_HCTRL0),
+		 isa1200_read_reg(client, ISA1200_HCTRL1),
+		 isa1200_read_reg(client, 0x32),
+		 isa1200_read_reg(client, 0x33),
+		 isa1200_read_reg(client, 0x34),
+		 isa1200_read_reg(client, 0x35));
 }
 
 static int isa1200_setup(struct i2c_client *client)
@@ -271,19 +379,13 @@ static int isa1200_setup(struct i2c_client *client)
 	int temp, rc;
 	u8 value;
 
-	gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 0);
-	if (haptic->is_len_gpio_valid == true)
-		gpio_set_value_cansleep(haptic->pdata->hap_len_gpio, 0);
-
-	udelay(250);
-
-	gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 1);
-	if (haptic->is_len_gpio_valid == true)
+	if (haptic->is_len_gpio_valid == true) {
 		gpio_set_value_cansleep(haptic->pdata->hap_len_gpio, 1);
+		udelay(250);
+	}
 
-	value =	(haptic->pdata->smart_en << 3) |
-		(haptic->pdata->is_erm << 5) |
-		(haptic->pdata->ext_clk_en << 7);
+	value = (haptic->pdata->smart_en << 3) |
+	    (haptic->pdata->is_erm << 5) | (haptic->pdata->ext_clk_en << 7);
 
 	rc = isa1200_write_reg(client, ISA1200_HCTRL1, value);
 	if (rc < 0) {
@@ -309,9 +411,8 @@ static int isa1200_setup(struct i2c_client *client)
 	}
 
 	value |= (haptic->pdata->mode_ctrl << 3) |
-		(haptic->pdata->overdrive_high << 5) |
-		(haptic->pdata->overdrive_en << 5) |
-		(haptic->pdata->chip_en << 7);
+	    (haptic->pdata->overdrive_high << 5) |
+	    (haptic->pdata->overdrive_en << 6) | (haptic->pdata->chip_en << 7);
 
 	rc = isa1200_write_reg(client, ISA1200_HCTRL0, value);
 	if (rc < 0) {
@@ -332,15 +433,21 @@ static int isa1200_setup(struct i2c_client *client)
 		}
 	}
 
+	/* set max voltage to 3.2v LDO output should be 3.0v */
+	rc = isa1200_write_reg(client, 0x00, 0x01);
+	if (rc < 0) {
+		pr_err("%s: i2c write failure\n", __func__);
+		goto reset_hctrl1;
+	}
+
 	haptic->hctrl0_val = value;
-	dump_isa1200_reg("new:", client);
+	dump_isa1200_reg("isa1200 new:", client);
 	return 0;
 
 reset_hctrl1:
 	i2c_smbus_write_byte_data(client, ISA1200_HCTRL1,
 				ISA1200_HCTRL1_RESET);
 reset_gpios:
-	gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 0);
 	if (haptic->is_len_gpio_valid == true)
 		gpio_set_value_cansleep(haptic->pdata->hap_len_gpio, 0);
 	return rc;
@@ -439,6 +546,94 @@ put_regs:
 	return rc;
 }
 
+static ssize_t isa1200_write_pattern(struct file *filp, struct kobject *kobj,
+				     struct bin_attribute *attr,
+				     char *buffer, loff_t offset, size_t count)
+{
+	unsigned long flags;
+	int time;
+	struct timed_output_dev *tdev;
+	struct isa1200_chip *haptic;
+
+	tdev = dev_get_drvdata(container_of(kobj, struct device, kobj));
+	haptic = container_of(tdev, struct isa1200_chip, dev);
+
+	spin_lock_irqsave(&haptic->lock, flags);
+
+	memcpy(pattern, buffer, count);
+	time = pattern[2];
+	pattern[count] = 0;	/* add 0 in end in case user forgot to disable */
+	pattern[count + 1] = 10;
+	haptic->pat_mode = pattern[0];
+	haptic->pat_len = count + 2;
+	haptic->pat_i = 1;
+
+	time = (time > haptic->pdata->max_timeout ?
+		haptic->pdata->max_timeout : time);
+
+	queue_work(haptic->hap_wq, &haptic->pat_work);
+
+	spin_unlock_irqrestore(&haptic->lock, flags);
+
+	return 0;
+}
+
+static ssize_t isa1200_read_cdbgstr(struct file *filp, struct kobject *kobj,
+				    struct bin_attribute *attr,
+				    char *buffer, loff_t off, size_t count)
+{
+	struct timed_output_dev *tdev;
+	struct isa1200_chip *haptic;
+	tdev = dev_get_drvdata(container_of(kobj, struct device, kobj));
+	haptic = container_of(tdev, struct isa1200_chip, dev);
+
+	if (count > 256)
+		count = 256;
+	memcpy(buffer, cdbgstr, count);
+	pr_debug("isa1200 read cdbg:%s", cdbgstr);
+	return count;
+}
+
+static ssize_t isa1200_write_cdbgstr(struct file *filp, struct kobject *kobj,
+				     struct bin_attribute *attr,
+				     char *buffer, loff_t offset, size_t count)
+{
+	struct timed_output_dev *tdev;
+	struct isa1200_chip *haptic;
+	tdev = dev_get_drvdata(container_of(kobj, struct device, kobj));
+	haptic = container_of(tdev, struct isa1200_chip, dev);
+
+	if (count > 256)
+		count = 256;
+	memcpy(cdbgstr, buffer, count);
+	pr_debug("isa1200 write cdbg:%s", cdbgstr);
+	return count;
+}
+
+static struct bin_attribute isa1200_bin_attrs = {
+	.attr = {
+		 .name = "pattern",
+		 .mode = 0644},
+	.write = isa1200_write_pattern,
+	.size = PAT_MAX_LEN + 1,
+};
+
+static struct bin_attribute isa1201_bin_attrs = {
+	.attr = {
+		 .name = "cdbgstr",
+		 .mode = 0644},
+	.read = isa1200_read_cdbgstr,
+	.size = PAT_MAX_LEN + 1,
+};
+
+static struct bin_attribute isa1202_bin_attrs = {
+	.attr = {
+		 .name = "cdbgwrt",
+		 .mode = 0644},
+	.write = isa1200_write_cdbgstr,
+	.size = PAT_MAX_LEN + 1,
+};
+
 static int __devinit isa1200_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
@@ -502,7 +697,9 @@ static int __devinit isa1200_probe(struct i2c_client *client,
 	}
 
 	spin_lock_init(&haptic->lock);
+	mutex_init(&haptic->vib_lock);
 	INIT_WORK(&haptic->work, isa1200_chip_work);
+	INIT_WORK(&haptic->pat_work, isa1200_pat_work);
 	haptic->clk_on = false;
 
 	hrtimer_init(&haptic->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -572,9 +769,25 @@ static int __devinit isa1200_probe(struct i2c_client *client,
 		}
 	}
 
+	/* Create binary file */
+	ret = device_create_bin_file(haptic->dev.dev, &isa1200_bin_attrs);
+	ret = device_create_bin_file(haptic->dev.dev, &isa1201_bin_attrs);
+	ret = device_create_bin_file(haptic->dev.dev, &isa1202_bin_attrs);
+	if (ret)
+		goto reset_hctrl0;
+
+	haptic->hap_wq = alloc_workqueue("haptic_wq", WQ_HIGHPRI, 0);
+	if (haptic->hap_wq == NULL) {
+		ret = -ENOMEM;
+		goto err_create_workqueue;
+	}
+
+	haptic->pat = pattern;
 	printk(KERN_INFO "%s: %s registered\n", __func__, id->name);
 	return 0;
 
+err_create_workqueue:
+	destroy_workqueue(haptic->hap_wq);
 reset_hctrl0:
 	gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 0);
 	if (haptic->is_len_gpio_valid == true)
@@ -613,6 +826,8 @@ static int __devexit isa1200_remove(struct i2c_client *client)
 
 	hrtimer_cancel(&haptic->timer);
 	cancel_work_sync(&haptic->work);
+	cancel_work_sync(&haptic->pat_work);
+	destroy_workqueue(haptic->hap_wq);
 
 	/* turn-off current vibration */
 	isa1200_vib_set(haptic, 0);
@@ -661,10 +876,10 @@ static int isa1200_suspend(struct i2c_client *client, pm_message_t mesg)
 
 	hrtimer_cancel(&haptic->timer);
 	cancel_work_sync(&haptic->work);
+	cancel_work_sync(&haptic->pat_work);
 	/* turn-off current vibration */
 	isa1200_vib_set(haptic, 0);
 
-	gpio_set_value_cansleep(haptic->pdata->hap_en_gpio, 0);
 	if (haptic->is_len_gpio_valid == true)
 		gpio_set_value_cansleep(haptic->pdata->hap_len_gpio, 0);
 

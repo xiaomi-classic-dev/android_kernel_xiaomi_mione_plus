@@ -236,6 +236,11 @@ static void input_handle_event(struct input_dev *dev,
 			dev->sync = false;
 			disposition = INPUT_PASS_TO_HANDLERS;
 			break;
+		case SYN_ALWAYS_REPORT:
+			dev->sync = true;
+			code = SYN_REPORT;
+			disposition = INPUT_PASS_TO_HANDLERS;
+			break;
 		}
 		break;
 
