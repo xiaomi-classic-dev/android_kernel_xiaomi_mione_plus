@@ -149,6 +149,10 @@ struct mmc_host_ops {
 	unsigned long (*get_max_frequency)(struct mmc_host *host);
 	unsigned long (*get_min_frequency)(struct mmc_host *host);
 	int     (*notify_load)(struct mmc_host *, enum mmc_load);
+#define DETECT_CB_NO_CARD	1
+#define DETECT_CB_ERROR		2
+#define DETECT_CB_SUCCESS	4
+	void	(*detection_callback)(struct mmc_host *host, int notif);
 };
 
 struct mmc_card;
