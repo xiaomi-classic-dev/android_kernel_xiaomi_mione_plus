@@ -61,6 +61,14 @@ static int32_t msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 	int32_t rc = 0;
 	struct msm_camera_i2c_reg_tbl *i2c_tbl = a_ctrl->i2c_reg_tbl;
 	CDBG("%s: IN\n", __func__);
+	pr_debug("pos:%d, 0x%04x", next_lens_position, next_lens_position);
+
+	if (write_arr[0].reg_addr == 0x3402) {
+		/* IMX105 */
+		next_lens_position = swab16(next_lens_position);
+		pr_debug("pos:0x%04x", next_lens_position);
+	}
+
 	for (i = 0; i < size; i++) {
 		/* check that the index into i2c_tbl cannot grow larger that
 		the allocated size of i2c_tbl */
