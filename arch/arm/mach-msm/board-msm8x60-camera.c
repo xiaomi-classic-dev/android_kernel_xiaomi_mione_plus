@@ -19,6 +19,7 @@
 #include <mach/board-msm8660.h>
 #include <mach/gpiomux.h>
 #include <mach/msm_bus_board.h>
+#include <mach/camera.h>
 #include "devices-msm8x60.h"
 #include "devices.h"
 
