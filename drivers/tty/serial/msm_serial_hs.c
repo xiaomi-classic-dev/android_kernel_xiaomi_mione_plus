@@ -484,9 +484,8 @@ static int msm_hs_init_clk(struct uart_port *uport)
  * Goal is to have around 8 ms before indicate stale.
  * roundup (((Bit Rate * .008) / 10) + 1
  */
-static unsigned long msm_hs_set_bps_locked(struct uart_port *uport,
-			       unsigned int bps,
-				unsigned long flags)
+static void msm_hs_set_bps_locked(struct uart_port *uport,
+			       unsigned int bps)
 {
 	unsigned long rxstale;
 	unsigned long data;
@@ -585,16 +584,11 @@ static unsigned long msm_hs_set_bps_locked(struct uart_port *uport,
 	} else {
 		uport->uartclk = 7372800;
 	}
-
-	spin_unlock_irqrestore(&uport->lock, flags);
 	if (clk_set_rate(msm_uport->clk, uport->uartclk)) {
 		printk(KERN_WARNING "Error setting clock rate on UART\n");
-		WARN_ON(1);
-		spin_lock_irqsave(&uport->lock, flags);
-		return flags;
+		return;
 	}
 
-	spin_lock_irqsave(&uport->lock, flags);
 	data = rxstale & UARTDM_IPR_STALE_LSB_BMSK;
 	data |= UARTDM_IPR_STALE_TIMEOUT_MSB_BMSK & (rxstale << 2);
 
@@ -606,7 +600,6 @@ static unsigned long msm_hs_set_bps_locked(struct uart_port *uport,
 	 */
 	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_TX);
 	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_RX);
-	return flags;
 }
 
 
@@ -675,7 +668,6 @@ static void msm_hs_set_termios(struct uart_port *uport,
 	unsigned int c_cflag = termios->c_cflag;
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 
-	mutex_lock(&msm_uport->clk_mutex);
 	spin_lock_irqsave(&uport->lock, flags);
 
 	/*
@@ -702,7 +694,7 @@ static void msm_hs_set_termios(struct uart_port *uport,
 	if (!uport->uartclk)
 		msm_hs_set_std_bps_locked(uport, bps);
 	else
-		flags = msm_hs_set_bps_locked(uport, bps, flags);
+		msm_hs_set_bps_locked(uport, bps);
 
 	data = msm_hs_read(uport, UARTDM_MR2_ADDR);
 	data &= ~UARTDM_MR2_PARITY_MODE_BMSK;
@@ -785,7 +777,6 @@ static void msm_hs_set_termios(struct uart_port *uport,
 	msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
 	mb();
 	spin_unlock_irqrestore(&uport->lock, flags);
-	mutex_unlock(&msm_uport->clk_mutex);
 }
 
 /*
