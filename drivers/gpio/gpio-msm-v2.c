@@ -155,11 +155,6 @@ void __msm_gpio_set_intr_cfg_enable(unsigned gpio, unsigned val)
 	}
 }
 
-unsigned  __msm_gpio_get_intr_cfg_enable(unsigned gpio)
-{
-	return __msm_gpio_get_intr_config(gpio) & INTR_ENABLE;
-}
-
 void __msm_gpio_set_intr_cfg_type(unsigned gpio, unsigned type)
 {
 	unsigned cfg;
