@@ -202,6 +202,44 @@ static struct msm_sensor_output_info_t imx132_dimensions[] = {
 	 },
 };
 
+static struct msm_camera_csi_params imx132_csic_params = {
+	.data_format = CSI_10BIT,
+	.lane_cnt = 1,
+	.lane_assign = 0xe4,
+	.dpcm_scheme = 0,
+	.settle_cnt = 0x14,
+};
+
+static struct msm_camera_csi_params *imx132_csic_params_array[] = {
+	&imx132_csic_params,
+	&imx132_csic_params,
+};
+
+static struct msm_camera_csid_vc_cfg imx132_cid_cfg[] = {
+	{0, CSI_RAW10, CSI_DECODE_10BIT},
+	{1, CSI_EMBED_DATA, CSI_DECODE_8BIT},
+	{2, CSI_RESERVED_DATA_0, CSI_DECODE_8BIT},
+};
+
+static struct msm_camera_csi2_params imx132_csi_params = {
+	.csid_params = {
+			.lane_cnt = 1,
+			.lut_params = {
+				       .num_cid = ARRAY_SIZE(imx132_cid_cfg),
+				       .vc_cfg = imx132_cid_cfg,
+				       },
+			},
+	.csiphy_params = {
+			  .lane_cnt = 1,
+			  .settle_cnt = 0x14,
+			  },
+};
+
+static struct msm_camera_csi2_params *imx132_csi_params_array[] = {
+	&imx132_csi_params,
+	&imx132_csi_params,
+};
+
 static struct msm_sensor_output_reg_addr_t imx132_reg_addr = {
 	.x_output = 0x34C,
 	.y_output = 0x34E,
@@ -272,6 +310,7 @@ static struct msm_sensor_fn_t imx132_func_tbl = {
 	.sensor_config = msm_sensor_config,
 	.sensor_power_up = msm_sensor_power_up,
 	.sensor_power_down = msm_sensor_power_down,
+	.sensor_adjust_frame_lines = msm_sensor_adjust_frame_lines,
 	.sensor_get_csi_params = msm_sensor_get_csi_params,
 };
 
@@ -300,6 +339,8 @@ static struct msm_sensor_ctrl_t imx132_s_ctrl = {
 	.sensor_id_info = &imx132_id_info,
 	.sensor_exp_gain_info = &imx132_exp_gain_info,
 	.cam_mode = MSM_SENSOR_MODE_INVALID,
+	.csic_params = &imx132_csic_params_array[0],
+	.csi_params = &imx132_csi_params_array[0],
 	.msm_sensor_mutex = &imx132_mut,
 	.sensor_i2c_driver = &imx132_i2c_driver,
 	.sensor_v4l2_subdev_info = imx132_subdev_info,
