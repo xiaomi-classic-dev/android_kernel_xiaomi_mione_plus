@@ -62,7 +62,6 @@ struct msm_hsl_port {
 	unsigned int            old_snap_state;
 	unsigned int		ver_id;
 	int			tx_timeout;
-	short			cons_flags;
 };
 
 #define UARTDM_VERSION_11_13	0
@@ -1471,11 +1470,8 @@ static int msm_serial_hsl_suspend(struct device *dev)
 
 	if (port) {
 
-		if (is_console(port)) {
-			struct msm_hsl_port *msm_hsl_port = UART_TO_MSM(port);
-			msm_hsl_port->cons_flags = port->cons->flags;
+		if (is_console(port))
 			msm_hsl_deinit_clock(port);
-		}
 
 		uart_suspend_port(&msm_hsl_uart_driver, port);
 		if (device_may_wakeup(dev))
@@ -1497,12 +1493,8 @@ static int msm_serial_hsl_resume(struct device *dev)
 		if (device_may_wakeup(dev))
 			disable_irq_wake(port->irq);
 
-		if (is_console(port)) {
-			struct msm_hsl_port *msm_hsl_port = UART_TO_MSM(port);
-			if (!(msm_hsl_port->cons_flags & CON_ENABLED))
-				console_stop(port->cons);
+		if (is_console(port))
 			msm_hsl_init_clock(port);
-		}
 	}
 
 	return 0;
