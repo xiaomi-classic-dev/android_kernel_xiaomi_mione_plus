@@ -56,10 +56,8 @@
 #define RMI_DEVICE_RESET_CMD	0x01
 #define DEFAULT_RESET_DELAY_MS	20
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void rmi_driver_early_suspend(struct early_suspend *h);
-static void rmi_driver_late_resume(struct early_suspend *h);
-#endif
+static int fb_notifier_callback(struct notifier_block *self,
+		unsigned long event, void *data);
 
 /* sysfs files for attributes for driver values. */
 static ssize_t rmi_driver_bsr_show(struct device *dev,
@@ -1168,13 +1166,8 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 
 	mutex_init(&data->suspend_mutex);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	rmi_dev->early_suspend_handler.level =
-		EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	rmi_dev->early_suspend_handler.suspend = rmi_driver_early_suspend;
-	rmi_dev->early_suspend_handler.resume = rmi_driver_late_resume;
-	register_early_suspend(&rmi_dev->early_suspend_handler);
-#endif /* CONFIG_HAS_EARLYSUSPEND */
+	rmi_dev->fb_notif.notifier_call = fb_notifier_callback;
+ 	retval = fb_register_client(&rmi_dev->fb_notif);
 #endif /* CONFIG_PM */
 	data->enabled = true;
 
@@ -1203,14 +1196,12 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 }
 
 #ifdef CONFIG_PM
-static int rmi_driver_suspend(struct device *dev)
+static int rmi_driver_suspend(struct rmi_device *rmi_dev)
 {
-	struct rmi_device *rmi_dev;
 	struct rmi_driver_data *data;
 	struct rmi_function_container *entry;
 	int retval = 0;
 
-	rmi_dev = to_rmi_device(dev);
 	data = rmi_get_driverdata(rmi_dev);
 
 	mutex_lock(&data->suspend_mutex);
@@ -1243,14 +1234,12 @@ exit:
 	return retval;
 }
 
-static int rmi_driver_resume(struct device *dev)
+static int rmi_driver_resume(struct rmi_device *rmi_dev)
 {
-	struct rmi_device *rmi_dev;
 	struct rmi_driver_data *data;
 	struct rmi_function_container *entry;
 	int retval = 0;
 
-	rmi_dev = to_rmi_device(dev);
 	data = rmi_get_driverdata(rmi_dev);
 
 	mutex_lock(&data->suspend_mutex);
@@ -1284,23 +1273,31 @@ exit:
 	return retval;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void rmi_driver_early_suspend(struct early_suspend *h)
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data)
 {
+	struct fb_event *evdata = data;
+	int *blank;
 	struct rmi_device *rmi_dev =
-	    container_of(h, struct rmi_device, early_suspend_handler);
-
-	rmi_driver_suspend(&rmi_dev->dev);
+		container_of(self, struct rmi_device, fb_notif);
+ 	if (evdata && evdata->data && rmi_dev
+		&& event == FB_EVENT_BLANK) {
+		blank = evdata->data;
+		switch (*blank) {
+		case FB_BLANK_UNBLANK:
+		case FB_BLANK_NORMAL:
+		case FB_BLANK_VSYNC_SUSPEND:
+		case FB_BLANK_HSYNC_SUSPEND:
+			rmi_driver_resume(rmi_dev);
+			break;
+		default:
+		case FB_BLANK_POWERDOWN:
+			rmi_driver_suspend(rmi_dev);
+		}
+	}
+ 	return 0;
 }
 
-static void rmi_driver_late_resume(struct early_suspend *h)
-{
-	struct rmi_device *rmi_dev =
-	    container_of(h, struct rmi_device, early_suspend_handler);
-
-	rmi_driver_resume(&rmi_dev->dev);
-}
-#endif /* CONFIG_HAS_EARLYSUSPEND */
 #endif /* CONFIG_PM */
 
 static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
@@ -1308,9 +1305,8 @@ static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
 	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
 	int i;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&rmi_dev->early_suspend_handler);
-#endif /* CONFIG_HAS_EARLYSUSPEND */
+	fb_unregister_client(&rmi_dev->fb_notif);
+
 #ifdef	CONFIG_RMI4_DEBUG
 	teardown_debugfs(rmi_dev);
 #endif
@@ -1327,19 +1323,10 @@ static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
 	return 0;
 }
 
-#if !CONFIG_HAS_EARLYSUSPEND && UNIVERSAL_DEV_PM_OPS
-static UNIVERSAL_DEV_PM_OPS(rmi_driver_pm, rmi_driver_suspend,
-			    rmi_driver_resume, NULL);
-#endif
-
 static struct rmi_driver sensor_driver = {
 	.driver = {
 		.owner = THIS_MODULE,
 		.name = "rmi_generic",
-/* early suspend is prefer than normal suspend */
-#if !CONFIG_HAS_EARLYSUSPEND && UNIVERSAL_DEV_PM_OPS
-		.pm = &rmi_driver_pm,
-#endif
 	},
 	.probe = rmi_driver_probe,
 	.irq_handler = rmi_driver_irq_handler,
