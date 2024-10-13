@@ -13,7 +13,6 @@
 #ifndef AUDIO_LPA_H
 #define AUDIO_LPA_H
 
-#include <linux/earlysuspend.h>
 #include <linux/wakelock.h>
 
 #define ADRV_STATUS_OBUF_GIVEN 0x00000001
@@ -27,13 +26,6 @@ struct buffer {
 	unsigned used;		/* Input usage actual DSP produced PCM size  */
 	unsigned addr;
 };
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-struct audlpa_suspend_ctl {
-	struct early_suspend node;
-	struct audio *audio;
-};
-#endif
 
 struct codec_operations {
 	long (*ioctl)(struct file *, unsigned int, unsigned long);
@@ -68,10 +60,6 @@ struct audio {
 	int stopped; /* set when stopped, cleared on flush */
 	int buf_refresh;
 	int teos; /* valid only if tunnel mode & no data left for decoder */
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct audlpa_suspend_ctl suspend_ctl;
-#endif
 
 	struct wake_lock wakelock;
 #ifdef CONFIG_DEBUG_FS

@@ -27,7 +27,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
-#include <linux/earlysuspend.h>
 #include <linux/msm_ion.h>
 #include <linux/list.h>
 #include <linux/slab.h>
@@ -1133,9 +1132,6 @@ static int audio_release(struct inode *inode, struct file *file)
 	q6asm_audio_client_free(audio->ac);
 	audlpa_reset_ion_region(audio);
 	ion_client_destroy(audio->client);
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&audio->suspend_ctl.node);
-#endif
 	audio->opened = 0;
 	audio->out_enabled = 0;
 	audio->out_prefill = 0;
@@ -1182,28 +1178,6 @@ static void audlpa_post_event(struct audio *audio, int type,
 	spin_unlock(&audio->event_queue_lock);
 	wake_up(&audio->event_wait);
 }
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void audlpa_suspend(struct early_suspend *h)
-{
-	struct audlpa_suspend_ctl *ctl =
-		container_of(h, struct audlpa_suspend_ctl, node);
-	union msm_audio_event_payload payload;
-
-	pr_debug("%s:\n", __func__);
-	audlpa_post_event(ctl->audio, AUDIO_EVENT_SUSPEND, payload);
-}
-
-static void audlpa_resume(struct early_suspend *h)
-{
-	struct audlpa_suspend_ctl *ctl =
-		container_of(h, struct audlpa_suspend_ctl, node);
-	union msm_audio_event_payload payload;
-
-	pr_debug("%s:\n", __func__);
-	audlpa_post_event(ctl->audio, AUDIO_EVENT_RESUME, payload);
-}
-#endif
 
 #ifdef CONFIG_DEBUG_FS
 static ssize_t audlpa_debug_open(struct inode *inode, struct file *file)
@@ -1360,13 +1334,6 @@ static int audio_open(struct inode *inode, struct file *file)
 
 	if (IS_ERR(audio->dentry))
 		pr_err("%s: debugfs_create_file failed\n", __func__);
-#endif
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	audio->suspend_ctl.node.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;
-	audio->suspend_ctl.node.resume = audlpa_resume;
-	audio->suspend_ctl.node.suspend = audlpa_suspend;
-	audio->suspend_ctl.audio = audio;
-	register_early_suspend(&audio->suspend_ctl.node);
 #endif
 	for (i = 0; i < AUDLPA_EVENT_NUM; i++) {
 		e_node = kmalloc(sizeof(struct audlpa_event), GFP_KERNEL);
