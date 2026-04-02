@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/kernel_stat.h>
+#include <linux/random.h>
 
 #include <trace/events/irq.h>
 
@@ -624,6 +625,8 @@ void handle_percpu_devid_irq(unsigned int irq, struct irq_desc *desc)
 	trace_irq_handler_entry(irq, action);
 	res = action->handler(irq, dev_id);
 	trace_irq_handler_exit(irq, action, res);
+
+	add_interrupt_randomness(irq, action->flags);
 
 	if (chip->irq_eoi)
 		chip->irq_eoi(&desc->irq_data);
