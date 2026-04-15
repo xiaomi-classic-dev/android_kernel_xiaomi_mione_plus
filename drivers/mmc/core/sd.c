@@ -1326,8 +1326,11 @@ int mmc_attach_sd(struct mmc_host *host)
 	}
 
 	err = mmc_send_app_op_cond(host, 0, &ocr);
-	if (err)
+	if (err) {
+		if (host->ops->detection_callback)
+			host->ops->detection_callback(host, DETECT_CB_NO_CARD);
 		return err;
+	}
 
 	mmc_sd_attach_bus_ops(host);
 	if (host->ocr_avail_sd)
@@ -1409,6 +1412,8 @@ int mmc_attach_sd(struct mmc_host *host)
 		goto remove_card;
 
 	mmc_init_clk_scaling(host);
+	if (host->ops->detection_callback)
+		host->ops->detection_callback(host, DETECT_CB_SUCCESS);
 
 	return 0;
 
@@ -1422,7 +1427,8 @@ err:
 
 	pr_err("%s: error %d whilst initialising SD card\n",
 		mmc_hostname(host), err);
+	if (host->ops->detection_callback)
+		host->ops->detection_callback(host, DETECT_CB_ERROR);
 
 	return err;
 }
-
