@@ -138,6 +138,10 @@ struct mmc_host_ops {
 	void	(*enable_preset_value)(struct mmc_host *host, bool enable);
 	int	(*select_drive_strength)(unsigned int max_dtr, int host_drv, int card_drv);
 	void	(*hw_reset)(struct mmc_host *host);
+#define DETECT_CB_NO_CARD	1
+#define DETECT_CB_ERROR		2
+#define DETECT_CB_SUCCESS	4
+	void	(*detection_callback)(struct mmc_host *host, int notif);
 };
 
 struct mmc_card;
