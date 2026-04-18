@@ -42,7 +42,6 @@
 #include <mach/cpuidle.h>
 #include "idle.h"
 #include "pm.h"
-#include "rpm_resources.h"
 #include "scm-boot.h"
 #include "spm.h"
 #include "timer.h"
@@ -672,11 +671,6 @@ int msm_pm_idle_prepare(struct cpuidle_device *dev,
 		case MSM_PM_SLEEP_MODE_POWER_COLLAPSE_STANDALONE:
 			if (!allow)
 				break;
-
-			if (!dev->cpu && msm_rpm_local_request_is_outstanding()) {
-				allow = false;
-				break;
-			}
 			/* fall through */
 
 		case MSM_PM_SLEEP_MODE_RETENTION:
