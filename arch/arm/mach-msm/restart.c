@@ -50,18 +50,10 @@
 static int restart_mode;
 void *restart_reason;
 
+static int in_panic;
+
 int pmic_reset_irq;
 static void __iomem *msm_tmr0_base;
-
-#ifdef CONFIG_MSM_DLOAD_MODE
-static int in_panic;
-static void *dload_mode_addr;
-
-/* Download mode master kill-switch */
-static int dload_set(const char *val, struct kernel_param *kp);
-static int download_mode = 1;
-module_param_call(download_mode, dload_set, param_get_int,
-			&download_mode, 0644);
 
 static int panic_prep_restart(struct notifier_block *this,
 			      unsigned long event, void *ptr)
@@ -73,6 +65,16 @@ static int panic_prep_restart(struct notifier_block *this,
 static struct notifier_block panic_blk = {
 	.notifier_call	= panic_prep_restart,
 };
+
+#ifdef CONFIG_MSM_DLOAD_MODE
+
+static void *dload_mode_addr;
+
+/* Download mode master kill-switch */
+static int dload_set(const char *val, struct kernel_param *kp);
+static int download_mode;
+module_param_call(download_mode, dload_set, param_get_int,
+			&download_mode, 0644);
 
 static void set_dload_mode(int on)
 {
@@ -120,6 +122,9 @@ static void __msm_power_off(int lower_pshold)
 #ifdef CONFIG_MSM_DLOAD_MODE
 	set_dload_mode(0);
 #endif
+	__raw_writel(0x0, restart_reason);
+	printk("pid=%d, comm=%s\n", current->pid, current->comm);
+
 	pm8xxx_reset_pwr_off(0);
 
 	if (lower_pshold) {
@@ -201,7 +206,9 @@ void msm_restart(char mode, const char *cmd)
 
 	pm8xxx_reset_pwr_off(1);
 
-	if (cmd != NULL) {
+	if (in_panic) {
+		__raw_writel(0x77665508, restart_reason);
+	} else if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
 			__raw_writel(0x77665500, restart_reason);
 		} else if (!strncmp(cmd, "recovery", 8)) {
@@ -213,6 +220,8 @@ void msm_restart(char mode, const char *cmd)
 		} else {
 			__raw_writel(0x77665501, restart_reason);
 		}
+	} else {
+		__raw_writel(0x77665501, restart_reason);
 	}
 
 	__raw_writel(0, msm_tmr0_base + WDT0_EN);
@@ -260,6 +269,7 @@ static int __init msm_restart_init(void)
 #endif
 	msm_tmr0_base = msm_timer_get_timer0_base();
 	restart_reason = MSM_IMEM_BASE + RESTART_REASON_ADDR;
+	__raw_writel(0x77665510, restart_reason);
 	pm_power_off = msm_power_off;
 
 	return 0;

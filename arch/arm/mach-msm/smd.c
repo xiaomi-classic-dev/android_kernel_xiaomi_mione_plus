@@ -574,7 +574,7 @@ void smd_diag(void)
 	x = smem_find(ID_DIAG_ERR_MSG, SZ_DIAG_ERR_MSG);
 	if (x != 0) {
 		x[SZ_DIAG_ERR_MSG - 1] = 0;
-		SMD_INFO("smem: DIAG '%s'\n", x);
+		pr_err("smem: DIAG(crash info) '%s'\n", x);
 	}
 
 	x = smem_get_entry(SMEM_ERR_CRASH_LOG, &size);
