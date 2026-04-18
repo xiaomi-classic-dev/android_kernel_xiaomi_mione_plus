@@ -110,6 +110,18 @@ config TOUCHSCREEN_ATMEL_MXT
 	  To compile this driver as a module, choose M here: the
 	  module will be called atmel_mxt_ts.
 
+config TOUCHSCREEN_ATMEL_MXT_MIONE
+	tristate "MIONE Atmel mXT I2C Touchscreen"
+	depends on I2C
+	help
+	  Say Y here if you have the Xiaomi Mione-specific Atmel mXT
+	  touchscreen connected to your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called atmel_mxt_ts_mione.
+
 config TOUCHSCREEN_AUO_PIXCIR
 	tristate "AUO in-cell touchscreen using Pixcir ICs"
 	depends on I2C
