@@ -1,0 +1,9 @@
+config TOUCHSCREEN_SYNAPTICS_I2C_RMI4_MIONE
+	tristate "MIONE Synaptics i2c rmi4 touchscreen"
+	depends on I2C && INPUT
+	help
+	  Say Y here if you have a Xiaomi Mione-specific Synaptics RMI4
+	  touchscreen and want to enable support for it.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called synaptics_rmi4_ts.
