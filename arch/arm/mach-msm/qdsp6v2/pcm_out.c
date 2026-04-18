@@ -318,6 +318,11 @@ static int pcm_out_open(struct inode *inode, struct file *file)
 		goto fail;
 	}
 
+	mutex_init(&pcm->lock);
+	mutex_init(&pcm->write_lock);
+	init_waitqueue_head(&pcm->write_wait);
+	spin_lock_init(&pcm->dsp_lock);
+
 	rc = q6asm_open_write(pcm->ac, FORMAT_LINEAR_PCM);
 	if (rc < 0) {
 		pr_err("%s: pcm out open failed for session %d\n", __func__,
@@ -326,10 +331,6 @@ static int pcm_out_open(struct inode *inode, struct file *file)
 		goto fail;
 	}
 
-	mutex_init(&pcm->lock);
-	mutex_init(&pcm->write_lock);
-	init_waitqueue_head(&pcm->write_wait);
-	spin_lock_init(&pcm->dsp_lock);
 	atomic_set(&pcm->out_enabled, 0);
 	atomic_set(&pcm->out_stopped, 0);
 	atomic_set(&pcm->out_count, pcm->buffer_count);
