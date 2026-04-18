@@ -175,7 +175,7 @@ static inline uint32_t msm_spm_drv_get_sts_pmic_state(
 	}
 }
 
-uint32_t msm_spm_drv_get_sts_curr_pmic_data(
+static inline uint32_t msm_spm_drv_get_sts_curr_pmic_data(
 		struct msm_spm_driver_data *dev)
 {
 	if (dev->major == SAW2_MAJOR_2) {
