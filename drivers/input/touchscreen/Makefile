@@ -86,3 +86,6 @@ obj-$(CONFIG_TOUCHSCREEN_FT5X06)	+= ft5x06_ts.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4)		+= synaptics_i2c_rmi4.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_RMI4_DEV)	+= synaptics_rmi_dev.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE) 	+= synaptics_fw_update.o
+obj-$(CONFIG_TOUCHSCREEN_FT5X0X)       += ft5x0x_ts.o
+obj-$(CONFIG_TOUCHSCREEN_FT5X0X_I2C)   += ft5x0x_ts_i2c.o
+obj-$(CONFIG_TOUCHSCREEN_FT5X0X_SPI)   += ft5x0x_ts_spi.o
