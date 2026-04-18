@@ -268,9 +268,9 @@ enum vdd_dig_levels {
 	VDD_DIG_NONE,
 	VDD_DIG_LOW,
 	VDD_DIG_NOMINAL,
-	VDD_DIG_HIGH,
-	VDD_DIG_NUM
+	VDD_DIG_HIGH
 };
+#define VDD_DIG_NUM	(VDD_DIG_HIGH + 1)
 
 static int set_vdd_dig(struct clk_vdd_class *vdd_class, int level)
 {
