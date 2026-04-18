@@ -71,6 +71,14 @@ int32_t msm_actuator_i2c_write(struct msm_actuator_ctrl_t *a_ctrl,
 	uint32_t size = a_ctrl->reg_tbl_size, i = 0;
 	int32_t rc = 0;
 	CDBG("%s: IN\n", __func__);
+	pr_debug("pos:%d, 0x%04x", next_lens_position, next_lens_position);
+
+	if (write_arr[0].reg_addr == 0x3402) {
+		/* IMX105 */
+		next_lens_position = swab16(next_lens_position);
+		pr_debug("pos:0x%04x", next_lens_position);
+	}
+
 	for (i = 0; i < size; i++) {
 		if (write_arr[i].reg_write_type == MSM_ACTUATOR_WRITE_DAC) {
 			value = (next_lens_position <<
