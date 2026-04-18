@@ -198,6 +198,8 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	return error;
 }
 
+extern void disable_hlt(void);
+extern void enable_hlt(void);
 /**
  * suspend_devices_and_enter - Suspend devices and enter system sleep state.
  * @state: System sleep state to enter.
@@ -229,7 +231,9 @@ int suspend_devices_and_enter(suspend_state_t state)
 		goto Recover_platform;
 
 	do {
+		disable_hlt();
 		error = suspend_enter(state, &wakeup);
+		enable_hlt();
 	} while (!error && !wakeup
 		&& suspend_ops->suspend_again && suspend_ops->suspend_again());
 
