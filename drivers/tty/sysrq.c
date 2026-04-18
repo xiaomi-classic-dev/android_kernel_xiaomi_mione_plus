@@ -44,6 +44,7 @@
 
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>
+#include "../../mach-msm/msm_watchdog.h"
 
 /* Whether we react on sysrq keys or just ignore them */
 static int __read_mostly sysrq_enabled = SYSRQ_DEFAULT_ENABLE;
@@ -265,7 +266,9 @@ static struct sysrq_key_op sysrq_showregs_op = {
 
 static void sysrq_handle_showstate(int key)
 {
+	msm_watchdog_disable();
 	show_state();
+	msm_watchdog_enable();
 }
 static struct sysrq_key_op sysrq_showstate_op = {
 	.handler	= sysrq_handle_showstate,
