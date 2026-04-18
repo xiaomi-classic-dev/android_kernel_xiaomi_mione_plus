@@ -596,7 +596,7 @@ static struct gpiomux_setting isl29028_irq_config = {
 };
 #endif
 
-#if defined(CONFIG_SENSORS_LIS3DH) || defined(CONFIG_SENSORS_LSM303D)
+#if defined(CONFIG_SENSORS_LIS3DH_MIONE) || defined(CONFIG_SENSORS_LSM303D)
 static struct gpiomux_setting st_irq_config = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_2MA,
@@ -1978,7 +1978,7 @@ static struct msm_gpiomux_config msm8x60_mione_configs[] __initdata = {
 	{.gpio = 118,
 		.settings = {[GPIOMUX_ACTIVE] = &console_uart,			[GPIOMUX_SUSPENDED] = &gpio_nc_cfg,},			},
 #endif
-#if defined(CONFIG_SENSORS_LIS3DH) || defined(CONFIG_SENSORS_LSM303D)
+#if defined(CONFIG_SENSORS_LIS3DH_MIONE) || defined(CONFIG_SENSORS_LSM303D)
 	{.gpio = 123,
 		.settings = {[GPIOMUX_ACTIVE] = &st_irq_config,			[GPIOMUX_SUSPENDED] = &st_irq_config,},			},
 #endif
