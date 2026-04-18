@@ -73,6 +73,7 @@
 #include <mach/msm_spi.h>
 #include <mach/msm_serial_hs.h>
 #include <mach/msm_serial_hs_lite.h>
+#include <mach/bcm_bt_lpm.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_memtypes.h>
 #include <asm/mach/mmc.h>
@@ -4149,9 +4150,8 @@ static int configure_uart_gpios(int on)
 	return ret;
 }
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
-       .inject_rx_on_wakeup = 1,
-       .rx_to_inject = 0xFD,
        .gpio_config = configure_uart_gpios,
+	   .exit_lpm_cb = bcm_bt_lpm_exit_lpm_locked,
 };
 #endif
 
@@ -5786,6 +5786,20 @@ static struct platform_device qseecom_device = {
 };
 
 static int msm_sdcc_setup_pad(int dev_id, unsigned int enable);
+struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
+	.gpio_wake = XIAOMI_GPIO_BT_WAKE,
+	.gpio_host_wake = XIAOMI_GPIO_BT_HOST_WAKE,
+	.request_clock_off_locked = msm_hs_request_clock_off_locked,
+	.request_clock_on_locked = msm_hs_request_clock_on_locked,
+};
+
+struct platform_device bcm_bt_lpm_device = {
+	.name = "bcm_bt_lpm",
+	.id = 0,
+	.dev = {
+		.platform_data = &bcm_bt_lpm_pdata,
+		},
+};
 
 /* BCM4329 returns wrong sdio_vsn(1) when we read cccr,
  * we use predefined value (sdio_vsn=2) here to initial sdio driver well
@@ -5890,6 +5904,7 @@ static struct platform_device *surf_devices[] __initdata = {
 	&msm_device_ssbi_pmic2,
 #endif
 	&xiaomi_rfkill,
+	&bcm_bt_lpm_device,
 #ifdef CONFIG_I2C_SSBI
 	&msm_device_ssbi3,
 #endif
@@ -8464,7 +8479,8 @@ static void __init msm8x60_init_buses(void)
 #endif
 
 #ifdef CONFIG_SERIAL_MSM_HS
-	msm_uart_dm1_pdata.wakeup_irq = gpio_to_irq(54); /* GSBI6(2) */
+	msm_uart_dm1_pdata.wakeup_irq = 0;
+	/* = gpio_to_irq(54); GSBI6(2) */
 	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
 #endif
 #ifdef CONFIG_MSM_GSBI9_UART
