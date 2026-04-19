@@ -1098,7 +1098,7 @@ static void msm_hs_start_tx_locked(struct uart_port *uport )
 {
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 
-	clk_enable(msm_uport->clk);
+	clk_prepare_enable(msm_uport->clk);
 
 	if (msm_uport->exit_lpm_cb)
 		msm_uport->exit_lpm_cb(uport);
@@ -1108,7 +1108,7 @@ static void msm_hs_start_tx_locked(struct uart_port *uport )
 		if (msm_uport->tx.dma_in_flight == 0)
 			msm_hs_submit_tx_locked(uport);
 	}
-	clk_disable(msm_uport->clk);
+	clk_disable_unprepare(msm_uport->clk);
 }
 
 /*
