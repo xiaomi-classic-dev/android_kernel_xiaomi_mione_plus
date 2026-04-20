@@ -776,7 +776,8 @@ static int __init vid_enc_init(void)
 			__func__);
 		return -ENOMEM;
 	}
-	rc = alloc_chrdev_region(&vid_enc_dev_num, 0, NUM_OF_DRIVER_NODES,
+	rc = alloc_chrdev_region(&vid_enc_dev_num, 0,
+			NUM_OF_ACTIVE_DRIVER_NODES,
 			VID_ENC_NAME);
 	if (rc < 0) {
 		ERR("%s: alloc_chrdev_region Failed rc = %d\n",
@@ -790,7 +791,7 @@ static int __init vid_enc_init(void)
 			__func__, rc);
 		goto error_vid_enc_class_create;
 	}
-	for (i = 0; i < NUM_OF_DRIVER_NODES; i++) {
+	for (i = 0; i < NUM_OF_ACTIVE_DRIVER_NODES; i++) {
 		class_devp = device_create(vid_enc_class, NULL,
 					(vid_enc_dev_num + i), NULL,
 					VID_ENC_NAME "%s", node_name[i]);
@@ -802,7 +803,7 @@ static int __init vid_enc_init(void)
 			if (!i)
 				goto error_vid_enc_class_device_create;
 			else
-				goto error_vid_enc_cdev_add;
+				goto error_vid_enc_device_create_failed;
 		}
 
 		vid_enc_device_p->device[i] = class_devp;
@@ -822,13 +823,17 @@ static int __init vid_enc_init(void)
 	return rc;
 
 error_vid_enc_cdev_add:
-	for (j = i-1; j >= 0; j--)
+	device_destroy(vid_enc_class, vid_enc_dev_num + i);
+error_vid_enc_device_create_failed:
+	for (j = i-1; j >= 0; j--) {
 		cdev_del(&(vid_enc_device_p->cdev[j]));
-	device_destroy(vid_enc_class, vid_enc_dev_num);
+		device_destroy(vid_enc_class, vid_enc_dev_num + j);
+	}
 error_vid_enc_class_device_create:
 	class_destroy(vid_enc_class);
 error_vid_enc_class_create:
-	unregister_chrdev_region(vid_enc_dev_num, 1);
+	unregister_chrdev_region(vid_enc_dev_num,
+		NUM_OF_ACTIVE_DRIVER_NODES);
 error_vid_enc_alloc_chrdev_region:
 	kfree(vid_enc_device_p);
 
@@ -839,11 +844,13 @@ static void __exit vid_enc_exit(void)
 {
 	int i = 0;
 	INFO("\n msm_vidc_enc: Inside %s()", __func__);
-	for (i = 0; i < NUM_OF_DRIVER_NODES; i++)
+	for (i = 0; i < NUM_OF_ACTIVE_DRIVER_NODES; i++) {
 		cdev_del(&(vid_enc_device_p->cdev[i]));
-	device_destroy(vid_enc_class, vid_enc_dev_num);
+		device_destroy(vid_enc_class, vid_enc_dev_num + i);
+	}
 	class_destroy(vid_enc_class);
-	unregister_chrdev_region(vid_enc_dev_num, 1);
+	unregister_chrdev_region(vid_enc_dev_num,
+		NUM_OF_ACTIVE_DRIVER_NODES);
 	kfree(vid_enc_device_p);
 	INFO("\n msm_vidc_enc: Return from %s()", __func__);
 }

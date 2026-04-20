@@ -19,6 +19,11 @@
 #include <media/msm/vidc_init.h>
 
 #define NUM_OF_DRIVER_NODES 2
+#ifdef CONFIG_MSM_VIDC_CONTENT_PROTECTION
+#define NUM_OF_ACTIVE_DRIVER_NODES NUM_OF_DRIVER_NODES
+#else
+#define NUM_OF_ACTIVE_DRIVER_NODES 1
+#endif
 
 struct vid_dec_msg {
 	struct list_head list;
