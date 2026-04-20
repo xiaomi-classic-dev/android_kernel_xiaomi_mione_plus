@@ -7201,6 +7201,12 @@ static struct pmic8058_charger_data pmic8058_charger_dragon = {
 		.charger_type = CHG_TYPE_AC,
 };
 
+static struct pmic8058_charger_data pmic8058_charger_mione = {
+		.charger_data_valid = true,
+		.max_source_current = 500,
+		.charger_type = CHG_TYPE_AC,
+};
+
 static struct pmic8058_charger_data pmic8058_charger_ffa_surf = {
 		.charger_data_valid = false,
 };
@@ -11305,7 +11311,9 @@ static void __init msm8x60_init(struct msm_board_data *board_data)
 
 	if (machine_is_msm8x60_dragon())
 		pm8058_platform_data.charger_pdata = &pmic8058_charger_dragon;
-	if (!machine_is_msm8x60_fluid())
+	else if (machine_is_mione())
+		pm8058_platform_data.charger_pdata = &pmic8058_charger_mione;
+	else if (!machine_is_msm8x60_fluid())
 		pm8058_platform_data.charger_pdata = &pmic8058_charger_ffa_surf;
 
 	/* configure pmic leds */
