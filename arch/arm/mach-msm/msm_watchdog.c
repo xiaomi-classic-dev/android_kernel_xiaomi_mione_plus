@@ -206,13 +206,20 @@ static struct notifier_block panic_blk = {
 		get_sclk_hz(bark_time) : get_sclk_hz(t_s * MSEC_PER_SEC))
 
 static int msm_watchdog_reboot_notifier(struct notifier_block *this,
-		unsigned long code, void *unused)
+				 unsigned long code, void *unused)
 {
+	/* 关机时直接禁用看门狗，防止关机后自动重启 */
+	if (code == SYS_POWER_OFF) {
+		__raw_writel(0, msm_wdt_base + WDT_EN);
+		mb();
+		return NOTIFY_DONE;
+	}
 
+	/* 正常重启时，重新配置看门狗超时 */
 	u64 timeout = get_reboot_bark_timeout(reboot_bark_timeout);
 	__raw_writel(timeout, msm_wdt_base + WDT_BARK_TIME);
-	__raw_writel(timeout + 3 * WDT_HZ,
-			msm_wdt_base + WDT_BITE_TIME);
+	__raw_writel(timeout + 10 * WDT_HZ,
+			   msm_wdt_base + WDT_BITE_TIME);
 	__raw_writel(1, msm_wdt_base + WDT_RST);
 
 	return NOTIFY_DONE;
