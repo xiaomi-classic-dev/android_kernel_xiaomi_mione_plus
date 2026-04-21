@@ -144,6 +144,10 @@ static int msm_watchdog_suspend(struct device *dev)
 	__raw_writel(1, msm_wdt_base + WDT_RST);
 	__raw_writel(0, msm_wdt_base + WDT_EN);
 	mb();
+
+	/* 同步禁用 PMIC 看门狗，防止睡眠时超时重启 */
+	pm8xxx_watchdog_reset_control(0);
+
 	return 0;
 }
 
