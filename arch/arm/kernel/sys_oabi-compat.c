@@ -204,8 +204,11 @@ asmlinkage long sys_oabi_fcntl64(unsigned int fd, unsigned int cmd,
 
 	switch (cmd) {
 	case F_GETLK64:
+	case F_OFD_GETLK:
 	case F_SETLK64:
 	case F_SETLKW64:
+	case F_OFD_SETLK:
+	case F_OFD_SETLKW:
 		if (copy_from_user(&user, (struct oabi_flock64 __user *)arg,
 				   sizeof(user)))
 			return -EFAULT;
@@ -223,6 +226,7 @@ asmlinkage long sys_oabi_fcntl64(unsigned int fd, unsigned int cmd,
 
 	switch (cmd) {
 	case F_GETLK64:
+	case F_OFD_GETLK:
 		if (!ret) {
 			user.l_type	= kernel.l_type;
 			user.l_whence	= kernel.l_whence;
@@ -235,6 +239,8 @@ asmlinkage long sys_oabi_fcntl64(unsigned int fd, unsigned int cmd,
 		}
 	case F_SETLK64:
 	case F_SETLKW64:
+	case F_OFD_SETLK:
+	case F_OFD_SETLKW:
 		set_fs(fs);
 	}
 
