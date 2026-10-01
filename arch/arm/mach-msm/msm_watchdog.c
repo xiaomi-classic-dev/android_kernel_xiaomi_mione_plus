@@ -88,7 +88,12 @@ module_param_call(runtime_disable, wdog_enable_set, param_get_int,
  * On the kernel command line specify msm_watchdog.appsbark=1 to handle
  * watchdog barks in Linux. By default barks are processed by the secure side.
  */
+#ifdef CONFIG_MACH_MIONE
+/* Restore the original MiOne TZ register-save registration. */
+static int appsbark;
+#else
 static int appsbark = 1;
+#endif
 module_param(appsbark, int, 0);
 
 static int appsbark_fiq;
@@ -314,6 +319,11 @@ void pet_watchdog(void)
 static void pet_watchdog_work(struct work_struct *work)
 {
 	pet_watchdog();
+#ifdef CONFIG_MACH_MIONE
+	if (enable)
+		pr_info("mione_power: watchdog pet_ns=%llu slack_ticks=%u\n",
+			last_pet, min_slack_ticks);
+#endif
 
 	if (enable)
 		schedule_delayed_work_on(0, &dogwork_struct, delay_time);
@@ -360,6 +370,10 @@ static void configure_bark_dump(void)
 				pr_err("Setting register save address failed.\n"
 				       "Registers won't be dumped on a dog "
 				       "bite\n");
+#ifdef CONFIG_MACH_MIONE
+			else
+				pr_info("mione_power: TZ watchdog register-save enabled\n");
+#endif
 		} else {
 			pr_err("Allocating register save space failed\n"
 			       "Registers won't be dumped on a dog bite\n");
