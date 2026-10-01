@@ -46,6 +46,9 @@ struct msm_serial_hs_platform_data {
 	int uart_rfr_gpio;
 	int userid;
 	int uartdm_rx_buf_size;
+	void (*exit_lpm_cb)(struct uart_port *uport);
+	int (*lpm_startup)(struct uart_port *uport);
+	void (*lpm_shutdown)(struct uart_port *uport);
 };
 
 unsigned int msm_hs_tx_empty(struct uart_port *uport);

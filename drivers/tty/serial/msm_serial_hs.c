@@ -179,6 +179,7 @@ struct msm_hs_port {
 
 	struct dentry *loopback_dir;
 	struct work_struct clock_off_w; /* work for actual clock off */
+	struct work_struct clock_on_w; /* process-context wake before TX */
 	struct workqueue_struct *hsuart_wq; /* hsuart workqueue */
 	struct mutex clk_mutex; /* mutex to guard against clock off/clock on */
 	bool tty_flush_receive;
@@ -1466,11 +1467,18 @@ out:
 static void msm_hs_start_tx_locked(struct uart_port *uport )
 {
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
+	const struct msm_serial_hs_platform_data *pdata = uport->dev->platform_data;
 
 	if (msm_uport->is_shutdown)
 		return;
+	if (pdata && pdata->exit_lpm_cb)
+		pdata->exit_lpm_cb(uport);
 
 	if (msm_uport->clk_state == MSM_HS_CLK_OFF) {
+		if (pdata && pdata->exit_lpm_cb) {
+			queue_work(msm_uport->hsuart_wq, &msm_uport->clock_on_w);
+			return;
+		}
 		pr_err("%s:Failing as GSBI clocks are OFF\n", __func__);
 		return;
 	}
@@ -1480,6 +1488,18 @@ static void msm_hs_start_tx_locked(struct uart_port *uport )
 		if (msm_uport->tx.dma_in_flight == 0)
 			msm_hs_submit_tx_locked(uport);
 	}
+}
+
+static void hsuart_clock_on_work(struct work_struct *work)
+{
+	struct msm_hs_port *port = container_of(work, struct msm_hs_port, clock_on_w);
+	unsigned long flags;
+
+	msm_hs_request_clock_on(&port->uport);
+	spin_lock_irqsave(&port->uport.lock, flags);
+	if (!port->is_shutdown && port->clk_state != MSM_HS_CLK_OFF)
+		msm_hs_start_tx_locked(&port->uport);
+	spin_unlock_irqrestore(&port->uport.lock, flags);
 }
 
 /*
@@ -1722,6 +1742,7 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 	int ret;
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 	struct circ_buf *tx_buf = &uport->state->xmit;
+	const struct msm_serial_hs_platform_data *pdata = uport->dev->platform_data;
 
 	mutex_lock(&msm_uport->clk_mutex);
 	spin_lock_irqsave(&uport->lock, flags);
@@ -1806,10 +1827,15 @@ static int msm_hs_check_clock_off(struct uart_port *uport)
 
 	spin_unlock_irqrestore(&uport->lock, flags);
 
-	/* Enable auto RFR */
+	/* HOST_WAKE must be able to restore RX before the peer sends data. */
 	data = msm_hs_read(uport, UARTDM_MR1_ADDR);
-	data |= UARTDM_MR1_RX_RDY_CTL_BMSK;
+	if (pdata && pdata->exit_lpm_cb)
+		data &= ~UARTDM_MR1_RX_RDY_CTL_BMSK;
+	else
+		data |= UARTDM_MR1_RX_RDY_CTL_BMSK;
 	msm_hs_write(uport, UARTDM_MR1_ADDR, data);
+	if (pdata && pdata->exit_lpm_cb)
+		msm_hs_write(uport, UARTDM_CR_ADDR, RFR_HIGH);
 	mb();
 
 	/* we really want to clock off */
@@ -2014,7 +2040,8 @@ void msm_hs_request_clock_on(struct uart_port *uport)
 	switch (msm_uport->clk_state) {
 	case MSM_HS_CLK_OFF:
 		wake_lock(&msm_uport->dma_wake_lock);
-		disable_irq_nosync(msm_uport->wakeup.irq);
+		if (use_low_power_wakeup(msm_uport))
+			disable_irq_nosync(msm_uport->wakeup.irq);
 		spin_unlock_irqrestore(&uport->lock, flags);
 		ret = msm_hs_clock_vote(msm_uport);
 		if (ret) {
@@ -2038,15 +2065,16 @@ void msm_hs_request_clock_on(struct uart_port *uport)
 		}
 		hrtimer_try_to_cancel(&msm_uport->clk_off_timer);
 
-		/* Enable Auto Ready for recieving */
-		data = msm_hs_read(uport, UARTDM_MR1_ADDR);
-		data |= UARTDM_MR1_RX_RDY_CTL_BMSK;
-		msm_hs_write(uport, UARTDM_MR1_ADDR, data);
-		mb();
 		if (msm_uport->rx.flush == FLUSH_SHUTDOWN)
 			msm_hs_start_rx_locked(uport);
 		if (msm_uport->rx.flush == FLUSH_STOP)
 			msm_uport->rx.flush = FLUSH_IGNORE;
+
+		/* Arm RX before releasing the peer's hardware flow control. */
+		data = msm_hs_read(uport, UARTDM_MR1_ADDR);
+		data |= UARTDM_MR1_RX_RDY_CTL_BMSK;
+		msm_hs_write(uport, UARTDM_MR1_ADDR, data);
+		mb();
 		msm_uport->clk_state = MSM_HS_CLK_ON;
 		break;
 	case MSM_HS_CLK_ON:
@@ -2259,6 +2287,11 @@ static int msm_hs_startup(struct uart_port *uport)
 
 	spin_unlock_irqrestore(&uport->lock, flags);
 
+	if (pdata && pdata->lpm_startup) {
+		ret = pdata->lpm_startup(uport);
+		if (ret)
+			pr_err("%s: Bluetooth wake driver unavailable: %d\n", __func__, ret);
+	}
 	pm_runtime_enable(uport->dev);
 
 	return 0;
@@ -2266,7 +2299,8 @@ static int msm_hs_startup(struct uart_port *uport)
 free_uart_irq:
 	free_irq(uport->irq, msm_uport);
 free_wake_irq:
-	irq_set_irq_wake(msm_uport->wakeup.irq, 0);
+	if (use_low_power_wakeup(msm_uport))
+		irq_set_irq_wake(msm_uport->wakeup.irq, 0);
 unconfigure_uart_gpio:
 	if (pdata && pdata->config_gpio)
 		msm_hs_unconfig_uart_gpios(uport);
@@ -2533,6 +2567,7 @@ static int __devinit msm_hs_probe(struct platform_device *pdev)
 	}
 
 	INIT_WORK(&msm_uport->clock_off_w, hsuart_clock_off_work);
+	INIT_WORK(&msm_uport->clock_on_w, hsuart_clock_on_work);
 	mutex_init(&msm_uport->clk_mutex);
 	atomic_set(&msm_uport->clk_count, 0);
 
@@ -2628,6 +2663,10 @@ static void msm_hs_shutdown(struct uart_port *uport)
 	const struct msm_serial_hs_platform_data *pdata =
 				pdev->dev.platform_data;
 
+
+	if (pdata && pdata->lpm_shutdown)
+		pdata->lpm_shutdown(uport);
+	cancel_work_sync(&msm_uport->clock_on_w);
 
 	/* deactivate if any clock off hrtimer is active. */
 	hrtimer_try_to_cancel(&msm_uport->clk_off_timer);

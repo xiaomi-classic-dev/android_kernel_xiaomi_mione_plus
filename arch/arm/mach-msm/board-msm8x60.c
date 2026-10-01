@@ -73,6 +73,7 @@
 #include <mach/irqs.h>
 #include <mach/msm_spi.h>
 #include <mach/msm_serial_hs.h>
+#include <mach/bcm_bt_lpm.h>
 #include <mach/msm_serial_hs_lite.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_memtypes.h>
@@ -4111,13 +4112,19 @@ static struct i2c_board_info bmc055_i2c_info[] __initdata = {
 
 #ifdef CONFIG_SERIAL_MSM_HS
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
-	.inject_rx_on_wakeup	= 1,
-	.rx_to_inject		= 0xFD,
 	.config_gpio		= 4,
 	.uart_tx_gpio		= 53,
 	.uart_rx_gpio		= 54,
 	.uart_cts_gpio		= 55,
 	.uart_rfr_gpio		= 56,
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+	.exit_lpm_cb		= bcm_bt_lpm_exit_lpm_locked,
+	.lpm_startup		= bcm_bt_lpm_startup,
+	.lpm_shutdown		= bcm_bt_lpm_shutdown,
+#else
+	.inject_rx_on_wakeup	= 1,
+	.rx_to_inject		= 0xFD,
+#endif
 };
 #endif
 
@@ -5764,6 +5771,21 @@ static struct platform_device xiaomi_rfkill = {
 	.id = -1,
 };
 
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+static struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
+	.gpio_wake = XIAOMI_GPIO_BT_WAKE,
+	.gpio_host_wake = XIAOMI_GPIO_BT_HOST_WAKE,
+	.request_clock_off = msm_hs_request_clock_off,
+	.request_clock_on = msm_hs_request_clock_on,
+};
+
+static struct platform_device bcm_bt_lpm_device = {
+	.name = "bcm_bt_lpm",
+	.id = -1,
+	.dev = { .platform_data = &bcm_bt_lpm_pdata },
+};
+#endif
+
 static struct platform_device *surf_devices[] __initdata = {
 	&msm8x60_device_acpuclk,
 	&msm_device_smd,
@@ -5790,6 +5812,9 @@ static struct platform_device *surf_devices[] __initdata = {
 	&msm_device_ssbi_pmic2,
 #endif
 	&xiaomi_rfkill,
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+	&bcm_bt_lpm_device,
+#endif
 #ifdef CONFIG_I2C_SSBI
 	&msm_device_ssbi3,
 #endif
@@ -8365,7 +8390,12 @@ static void __init msm8x60_init_buses(void)
 #endif
 
 #ifdef CONFIG_SERIAL_MSM_HS
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+	/* Broadcom HOST_WAKE replaces RX-edge wake and injected HCI bytes. */
+	msm_uart_dm1_pdata.wakeup_irq = 0;
+#else
 	msm_uart_dm1_pdata.wakeup_irq = gpio_to_irq(54); /* GSBI6(2) */
+#endif
 	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
 #endif
 #ifdef CONFIG_MSM_GSBI9_UART
