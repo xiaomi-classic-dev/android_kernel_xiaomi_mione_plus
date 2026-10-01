@@ -17,6 +17,7 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <mach/msm_iomap.h>
+#include <mach/mione_power_diag.h>
 
 #include "spm.h"
 
@@ -191,6 +192,9 @@ int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
 	uint32_t timeout_us;
 
 	dev = &per_cpu(msm_spm_devices, cpu);
+	mione_power_trace(MIONE_SAW_ENTER, cpu, vlevel,
+			  dev->reg_shadow[MSM_SPM_REG_SAW_STS],
+			  dev->vctl_timeout_us, 0);
 
 	if (msm_spm_debug_mask & MSM_SPM_DEBUG_VCTL)
 		pr_info("%s: requesting cpu %u vlevel 0x%x\n",
@@ -221,6 +225,8 @@ int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
 
 	dev->awake_vlevel = vlevel;
 	dev->dirty = true;
+	mione_power_trace(MIONE_SAW_DONE, cpu, vlevel,
+			  dev->reg_shadow[MSM_SPM_REG_SAW_STS], timeout_us, 0);
 
 	if (msm_spm_debug_mask & MSM_SPM_DEBUG_VCTL)
 		pr_info("%s: cpu %u done, remaining timeout %uus\n",
@@ -229,6 +235,8 @@ int msm_spm_set_vdd(unsigned int cpu, unsigned int vlevel)
 	return 0;
 
 set_vdd_bail:
+	mione_power_trace(MIONE_SAW_ERROR, cpu, vlevel,
+			  dev->reg_shadow[MSM_SPM_REG_SAW_STS], timeout_us, -EIO);
 	pr_err("%s: cpu %u failed, remaining timeout %uus, vlevel 0x%x\n",
 	       __func__, cpu, timeout_us, msm_spm_get_sts_curr_pmic_data(dev));
 

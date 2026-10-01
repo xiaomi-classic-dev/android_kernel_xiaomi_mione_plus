@@ -31,6 +31,7 @@
 #include <asm/cacheflush.h>
 #include <mach/scm.h>
 #include <mach/socinfo.h>
+#include <mach/mione_power_diag.h>
 #include "msm_watchdog.h"
 #include "timer.h"
 
@@ -145,6 +146,7 @@ static int msm_watchdog_suspend(struct device *dev)
 {
 	if (!enable)
 		return 0;
+	mione_power_trace(MIONE_WDOG_SUSPEND, 0, 0, 0, 0, 0);
 
 	__raw_writel(1, msm_wdt_base + WDT_RST);
 	__raw_writel(0, msm_wdt_base + WDT_EN);
@@ -156,6 +158,7 @@ static int msm_watchdog_resume(struct device *dev)
 {
 	if (!enable)
 		return 0;
+	mione_power_trace(MIONE_WDOG_RESUME, 0, 0, 0, 0, 0);
 
 	__raw_writel(1, msm_wdt_base + WDT_EN);
 	__raw_writel(1, msm_wdt_base + WDT_RST);
@@ -176,6 +179,19 @@ int msm_watchdog_enable(void)
 static int panic_wdog_handler(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
+#ifdef CONFIG_MACH_MIONE
+	/* Keep a hardware recovery deadline even if a panic dump blocks. */
+	mione_power_trace(MIONE_WDOG_PANIC, raw_smp_processor_id(),
+			  (u32)last_pet, (u32)(last_pet >> 32), panic_timeout, 0);
+	__raw_writel(30 * WDT_HZ, msm_wdt_base + WDT_BARK_TIME);
+	__raw_writel(40 * WDT_HZ, msm_wdt_base + WDT_BITE_TIME);
+	__raw_writel(1, msm_wdt_base + WDT_RST);
+	__raw_writel(1, msm_wdt_base + WDT_EN);
+	mb();
+	if (print_all_stacks)
+		show_state_filter(0);
+	return NOTIFY_DONE;
+#endif
 	if (panic_timeout == 0) {
 		__raw_writel(0, msm_wdt_base + WDT_EN);
 		mb();
@@ -215,6 +231,8 @@ static int msm_watchdog_reboot_notifier(struct notifier_block *this,
 {
 
 	u64 timeout = get_reboot_bark_timeout(reboot_bark_timeout);
+	mione_power_trace(MIONE_REBOOT, raw_smp_processor_id(), code,
+			  (u32)last_pet, (u32)(last_pet >> 32), 0);
 	__raw_writel(timeout, msm_wdt_base + WDT_BARK_TIME);
 	__raw_writel(timeout + 3 * WDT_HZ,
 			msm_wdt_base + WDT_BITE_TIME);
@@ -319,6 +337,9 @@ void pet_watchdog(void)
 static void pet_watchdog_work(struct work_struct *work)
 {
 	pet_watchdog();
+	mione_power_trace(MIONE_WDOG_PET, 0, (u32)last_pet,
+			  (u32)(last_pet >> 32), min_slack_ticks,
+			  __raw_readl(msm_wdt_base + WDT_STS));
 #ifdef CONFIG_MACH_MIONE
 	if (enable)
 		pr_info("mione_power: watchdog pet_ns=%llu slack_ticks=%u\n",
@@ -333,6 +354,9 @@ static irqreturn_t wdog_bark_handler(int irq, void *dev_id)
 {
 	unsigned long nanosec_rem;
 	unsigned long long t = sched_clock();
+	mione_power_trace(MIONE_WDOG_BARK, raw_smp_processor_id(),
+			  (u32)last_pet, (u32)(last_pet >> 32), irq,
+			  __raw_readl(msm_wdt_base + WDT_STS));
 
 	nanosec_rem = do_div(t, 1000000000);
 	printk(KERN_INFO "Watchdog bark! Now = %lu.%06lu\n", (unsigned long) t,
@@ -358,6 +382,7 @@ static void configure_bark_dump(void)
 	} cmd_buf;
 
 	if (!appsbark) {
+		/* Keep the proven #6 firmware buffer contract for this experiment. */
 		scm_regsave = (void *)__get_free_page(GFP_KERNEL);
 
 		if (scm_regsave) {
@@ -371,8 +396,9 @@ static void configure_bark_dump(void)
 				       "Registers won't be dumped on a dog "
 				       "bite\n");
 #ifdef CONFIG_MACH_MIONE
-			else
-				pr_info("mione_power: TZ watchdog register-save enabled\n");
+			else {
+				pr_info("mione_power: TZ watchdog register-save enabled (legacy page)\n");
+			}
 #endif
 		} else {
 			pr_err("Allocating register save space failed\n"
@@ -447,6 +473,8 @@ static void init_watchdog_work(struct work_struct *work)
 	__raw_writel(1, msm_wdt_base + WDT_EN);
 	__raw_writel(1, msm_wdt_base + WDT_RST);
 	last_pet = sched_clock();
+	mione_power_trace(MIONE_WDOG_INIT, 0, (u32)last_pet,
+			  (u32)(last_pet >> 32), bark_time, delay_time);
 
 	if (!has_vic)
 		enable_percpu_irq(msm_wdog_irq, IRQ_TYPE_EDGE_RISING);

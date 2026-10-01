@@ -25,6 +25,7 @@
 #include <asm/bootinfo.h>
 #endif
 #include <mach/board_mione.h>
+#include <mach/mione_power_diag.h>
 
 #ifdef CONFIG_ANDROID_RAM_CONSOLE
 #define MIONE_PERSISTENT_RAM_SIZE	SZ_1M
@@ -70,6 +71,10 @@ void __init mione_reserve(void)
 		return;
 	}
 	ram_console_reserved = true;
+	/* Console uses 248 KiB; diagnostics use 16 KiB at +256 KiB. */
+	BUILD_BUG_ON(MIONE_RAM_CONSOLE_SIZE > SZ_256K);
+	BUILD_BUG_ON(SZ_256K + SZ_16K > MIONE_PERSISTENT_RAM_SIZE);
+	mione_power_diag_reserve(pram->start + SZ_256K);
 }
 
 static char bootreason[256];

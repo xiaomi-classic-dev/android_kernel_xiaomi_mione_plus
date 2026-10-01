@@ -31,6 +31,7 @@
 #include <mach/msm_bus_board.h>
 #include <mach/socinfo.h>
 #include <mach/rpm-regulator.h>
+#include <mach/mione_power_diag.h>
 
 #include "acpuclock.h"
 #include "avs.h"
@@ -519,6 +520,9 @@ static void scpll_change_freq(int sc_pll, uint32_t l_val)
 {
 	uint32_t regval;
 	const void *base_addr = sc_pll_base[sc_pll];
+	mione_power_trace(MIONE_PLL_START, sc_pll, l_val,
+			  readl_relaxed(base_addr + SCPLL_CTL_OFFSET),
+			  readl_relaxed(base_addr + SCPLL_STATUS_OFFSET), 0);
 
 	/* Complex-slew switch to target frequency. */
 	regval = (l_val << 3) | COMPLEX_SLEW;
@@ -532,6 +536,9 @@ static void scpll_change_freq(int sc_pll, uint32_t l_val)
 	/* Wait for frequency switch to finish. */
 	while (readl_relaxed(base_addr + SCPLL_STATUS_OFFSET) & 0x1)
 		cpu_relax();
+	mione_power_trace(MIONE_PLL_DONE, sc_pll, l_val,
+			  readl_relaxed(base_addr + SCPLL_CTL_OFFSET),
+			  readl_relaxed(base_addr + SCPLL_STATUS_OFFSET), 0);
 }
 
 /* Vote for the L2 speed and return the speed that should be applied. */
@@ -603,8 +610,10 @@ static int increase_vdd(int cpu, unsigned int vdd_sc, unsigned int vdd_mem,
 
 	/* Increase vdd_mem active-set before vdd_dig and vdd_sc.
 	 * vdd_mem should be >= both vdd_sc and vdd_dig. */
+	mione_power_trace(MIONE_VDD_MEM_UP, cpu, vdd_mem, 0, 0, 0);
 	rc = rpm_vreg_set_voltage(RPM_VREG_ID_PM8058_S0, rpm_vreg_voter[cpu],
 				  vdd_mem, MAX_VDD_MEM, 0);
+	mione_power_trace(MIONE_VDD_MEM_UP, cpu, vdd_mem, 0, 1, rc);
 	if (rc) {
 		pr_err("%s: vdd_mem (cpu%d) increase failed (%d)\n",
 			__func__, cpu, rc);
@@ -612,8 +621,10 @@ static int increase_vdd(int cpu, unsigned int vdd_sc, unsigned int vdd_mem,
 	}
 
 	/* Increase vdd_dig active-set vote. */
+	mione_power_trace(MIONE_VDD_DIG_UP, cpu, vdd_dig, 0, 0, 0);
 	rc = rpm_vreg_set_voltage(RPM_VREG_ID_PM8058_S1, rpm_vreg_voter[cpu],
 				  vdd_dig, MAX_VDD_DIG, 0);
+	mione_power_trace(MIONE_VDD_DIG_UP, cpu, vdd_dig, 0, 1, rc);
 	if (rc) {
 		pr_err("%s: vdd_dig (cpu%d) increase failed (%d)\n",
 			__func__, cpu, rc);
@@ -628,7 +639,9 @@ static int increase_vdd(int cpu, unsigned int vdd_sc, unsigned int vdd_mem,
 		return rc;
 
 	/* Update per-core Scorpion voltage. */
+	mione_power_trace(MIONE_VDD_SC_UP, cpu, vdd_sc, 0, 0, 0);
 	rc = regulator_set_voltage(regulator_sc[cpu], vdd_sc, MAX_VDD_SC);
+	mione_power_trace(MIONE_VDD_SC_UP, cpu, vdd_sc, 0, 1, rc);
 	if (rc) {
 		pr_err("%s: vdd_sc (cpu%d) increase failed (%d)\n",
 			__func__, cpu, rc);
@@ -648,8 +661,10 @@ static void decrease_vdd(int cpu, unsigned int vdd_sc, unsigned int vdd_mem,
 	 * that's being affected. Don't do this in the hotplug remove path,
 	 * where the rail is off and we're executing on the other CPU. */
 	if (reason != SETRATE_HOTPLUG) {
+		mione_power_trace(MIONE_VDD_SC_DOWN, cpu, vdd_sc, 0, 0, 0);
 		ret = regulator_set_voltage(regulator_sc[cpu], vdd_sc,
 					    MAX_VDD_SC);
+		mione_power_trace(MIONE_VDD_SC_DOWN, cpu, vdd_sc, 0, 1, ret);
 		if (ret) {
 			pr_err("%s: vdd_sc (cpu%d) decrease failed (%d)\n",
 				__func__, cpu, ret);
@@ -658,8 +673,10 @@ static void decrease_vdd(int cpu, unsigned int vdd_sc, unsigned int vdd_mem,
 	}
 
 	/* Decrease vdd_dig active-set vote. */
+	mione_power_trace(MIONE_VDD_DIG_DOWN, cpu, vdd_dig, 0, 0, 0);
 	ret = rpm_vreg_set_voltage(RPM_VREG_ID_PM8058_S1, rpm_vreg_voter[cpu],
 				   vdd_dig, MAX_VDD_DIG, 0);
+	mione_power_trace(MIONE_VDD_DIG_DOWN, cpu, vdd_dig, 0, 1, ret);
 	if (ret) {
 		pr_err("%s: vdd_dig (cpu%d) decrease failed (%d)\n",
 			__func__, cpu, ret);
@@ -668,8 +685,10 @@ static void decrease_vdd(int cpu, unsigned int vdd_sc, unsigned int vdd_mem,
 
 	/* Decrease vdd_mem active-set after vdd_dig and vdd_sc.
 	 * vdd_mem should be >= both vdd_sc and vdd_dig. */
+	mione_power_trace(MIONE_VDD_MEM_DOWN, cpu, vdd_mem, 0, 0, 0);
 	ret = rpm_vreg_set_voltage(RPM_VREG_ID_PM8058_S0, rpm_vreg_voter[cpu],
 				   vdd_mem, MAX_VDD_MEM, 0);
+	mione_power_trace(MIONE_VDD_MEM_DOWN, cpu, vdd_mem, 0, 1, ret);
 	if (ret) {
 		pr_err("%s: vdd_mem (cpu%d) decrease failed (%d)\n",
 			__func__, cpu, ret);
@@ -715,8 +734,14 @@ static int acpuclk_8x60_set_rate(int cpu, unsigned long rate,
 	if (cpu > num_possible_cpus())
 		return -EINVAL;
 
-	if (reason == SETRATE_CPUFREQ || reason == SETRATE_HOTPLUG)
+	if (reason == SETRATE_CPUFREQ || reason == SETRATE_HOTPLUG ||
+	    reason == SETRATE_INIT)
+		mione_power_trace(MIONE_ACPU_ENTER, cpu, rate, reason, 0, 0);
+	if (reason == SETRATE_CPUFREQ || reason == SETRATE_HOTPLUG) {
+		mione_power_trace(MIONE_ACPU_LOCK, cpu, rate, reason, 0, 0);
 		mutex_lock(&drv_state.lock);
+		mione_power_trace(MIONE_ACPU_LOCKED, cpu, rate, reason, 0, 0);
+	}
 
 	strt_s = drv_state.current_speed[cpu];
 
@@ -764,13 +789,18 @@ static int acpuclk_8x60_set_rate(int cpu, unsigned long rate,
 		cpu, strt_s->acpuclk_khz, tgt_s->acpuclk_khz);
 
 	/* Switch CPU speed. */
+	mione_power_trace(MIONE_CPU_SWITCH, cpu, strt_s->acpuclk_khz,
+			  rate, reason, 0);
 	switch_sc_speed(cpu, tgt_s);
 
 	/* Update the L2 vote and apply the rate change. */
+	mione_power_trace(MIONE_L2_LOCK, cpu, rate, reason, 0, 0);
 	spin_lock_irqsave(&drv_state.l2_lock, flags);
+	mione_power_trace(MIONE_L2_LOCKED, cpu, rate, reason, 0, 0);
 	tgt_l2 = compute_l2_speed(cpu, tgt_s->l2_level);
 	set_l2_speed(tgt_l2);
 	spin_unlock_irqrestore(&drv_state.l2_lock, flags);
+	mione_power_trace(MIONE_L2_DONE, cpu, tgt_l2->khz, rate, reason, 0);
 
 	/* Nothing else to do for SWFI. */
 	if (reason == SETRATE_SWFI)
@@ -781,6 +811,7 @@ static int acpuclk_8x60_set_rate(int cpu, unsigned long rate,
 		goto out;
 
 	/* Update bus bandwith request. */
+	mione_power_trace(MIONE_BUS_VOTE, cpu, tgt_l2->bw_level, rate, 0, 0);
 	set_bus_bw(tgt_l2->bw_level);
 
 	/* Drop VDD levels if we can. */
@@ -796,6 +827,9 @@ static int acpuclk_8x60_set_rate(int cpu, unsigned long rate,
 out:
 	if (reason == SETRATE_CPUFREQ || reason == SETRATE_HOTPLUG)
 		mutex_unlock(&drv_state.lock);
+	if (reason == SETRATE_CPUFREQ || reason == SETRATE_HOTPLUG ||
+	    reason == SETRATE_INIT)
+		mione_power_trace(MIONE_ACPU_DONE, cpu, rate, reason, 0, rc);
 	return rc;
 }
 

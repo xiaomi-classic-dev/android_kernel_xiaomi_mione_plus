@@ -29,6 +29,7 @@
 #include <linux/suspend.h>
 #include <mach/socinfo.h>
 #include <mach/cpufreq.h>
+#include <mach/mione_power_diag.h>
 
 #include "acpuclock.h"
 
@@ -103,10 +104,16 @@ static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq)
 
 #endif
 	/* Match the original MiOne driver: retain the caller priority. */
+	mione_power_trace(MIONE_FREQ_PRE, policy->cpu, freqs.old, freqs.new,
+			  current->policy, current->rt_priority);
 
 	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 
+	mione_power_trace(MIONE_FREQ_CLOCK, policy->cpu, freqs.old, freqs.new,
+			  0, 0);
 	ret = acpuclk_set_rate(policy->cpu, new_freq, SETRATE_CPUFREQ);
+	mione_power_trace(MIONE_FREQ_POST, policy->cpu, freqs.old, freqs.new,
+			  0, ret);
 	if (!ret)
 		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 
@@ -117,6 +124,8 @@ static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq)
 		sched_setscheduler_nocheck(current, saved_sched_policy, &param);
 	}
 #endif
+	mione_power_trace(MIONE_FREQ_DONE, policy->cpu, freqs.old, freqs.new,
+			  0, ret);
 	return ret;
 }
 
@@ -125,6 +134,8 @@ static void set_cpu_work(struct work_struct *work)
 	struct cpufreq_work_struct *cpu_work =
 		container_of(work, struct cpufreq_work_struct, work);
 
+	mione_power_trace(MIONE_FREQ_WORK, cpu_work->policy->cpu,
+			  cpu_work->frequency, 0, 0, 0);
 	cpu_work->status = set_cpu_freq(cpu_work->policy, cpu_work->frequency);
 	complete(&cpu_work->complete);
 }
@@ -148,6 +159,8 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 	if (!alloc_cpumask_var(&mask, GFP_KERNEL))
 		return -ENOMEM;
 
+	mione_power_trace(MIONE_FREQ_TARGET, policy->cpu, target_freq,
+			  relation, policy->cur, 0);
 	mutex_lock(&per_cpu(cpufreq_suspend, policy->cpu).suspend_mutex);
 
 	if (per_cpu(cpufreq_suspend, policy->cpu).device_suspended) {
@@ -180,11 +193,17 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 		ret = set_cpu_freq(cpu_work->policy, cpu_work->frequency);
 		goto done;
 	} else {
-			cancel_work_sync(&cpu_work->work);
+		mione_power_trace(MIONE_FREQ_CANCEL, policy->cpu,
+				  cpu_work->frequency, 0, 0, 0);
+		cancel_work_sync(&cpu_work->work);
 		INIT_COMPLETION(cpu_work->complete);
-			queue_work_on(policy->cpu, msm_cpufreq_wq, &cpu_work->work);
+		mione_power_trace(MIONE_FREQ_QUEUE, policy->cpu,
+				  cpu_work->frequency, 0, 0, 0);
+		queue_work_on(policy->cpu, msm_cpufreq_wq, &cpu_work->work);
 		wait_for_completion(&cpu_work->complete);
-		}
+		mione_power_trace(MIONE_FREQ_WAIT_DONE, policy->cpu,
+				  cpu_work->frequency, 0, 0, cpu_work->status);
+	}
 
 	ret = cpu_work->status;
 
