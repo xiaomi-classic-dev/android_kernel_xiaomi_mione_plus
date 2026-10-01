@@ -56,6 +56,10 @@
 #include <asm/unwind.h>
 #include <asm/memblock.h>
 
+#ifdef CONFIG_BOOT_INFO
+#include <asm/bootinfo.h>
+#endif
+
 #if defined(CONFIG_DEPRECATED_PARAM_STRUCT)
 #include "compat.h"
 #endif
@@ -673,6 +677,33 @@ static int __init parse_tag_mem32(const struct tag *tag)
 }
 
 __tagtable(ATAG_MEM, parse_tag_mem32);
+
+#ifdef CONFIG_BOOT_INFO
+static int __init parse_tag_powerup_reason(const struct tag *tag)
+{
+	if (!tag_member_present(tag, u.powerup_reason)) {
+		pr_warn("MiOne: truncated powerup reason ATAG\n");
+		return -EINVAL;
+	}
+	set_powerup_reason(tag->u.powerup_reason.powerup_reason);
+	pr_info("MiOne powerup reason (ATAG): 0x%08x\n",
+		get_powerup_reason());
+	return 0;
+}
+__tagtable(ATAG_POWERUP_REASON, parse_tag_powerup_reason);
+
+static int __init parse_tag_memvendor(const struct tag *tag)
+{
+	if (!tag_member_present(tag, u.memvendor)) {
+		pr_warn("MiOne: truncated memory vendor ATAG\n");
+		return -EINVAL;
+	}
+	pr_info("MiOne memory vendor (ATAG): 0x%08x\n",
+		tag->u.memvendor.memvendor);
+	return 0;
+}
+__tagtable(ATAG_MEM_VENDOR, parse_tag_memvendor);
+#endif
 
 #if defined(CONFIG_VGA_CONSOLE) || defined(CONFIG_DUMMY_CONSOLE)
 struct screen_info screen_info = {
