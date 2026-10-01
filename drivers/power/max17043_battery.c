@@ -427,6 +427,11 @@ static int max17043_load_model(struct max17043_chip *chip)
 	}
 
 	/* Restore RCOMP and OCV */
+	pr_info("max17043 model restore: adjusted=%d charging=%d "
+		"vcell=%u ocv_before=%u ocv_after=%u wait_ms=%u verify=%d\n",
+		changed, battery_charging(), vcell, ocv,
+		((ocv1 * 256 + ocv2) * 5) / 4 / 16,
+		changed ? 500 : 200, ret);
 	i2c_smbus_write_word_data(client, 0x0C, (rcomp1 | rcomp2 << 8));
 	i2c_smbus_write_word_data(client, 0x0E, (ocv1 | ocv2 << 8));
 	/* Lock Model Access */
