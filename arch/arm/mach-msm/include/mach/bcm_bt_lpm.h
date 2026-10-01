@@ -20,17 +20,16 @@
  * this driver keeps WAKE asserted during TX. Called with uart
  * spinlock held. */
 extern void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);
+extern int bcm_bt_lpm_startup(struct uart_port *uport);
+extern void bcm_bt_lpm_shutdown(struct uart_port *uport);
 
 struct bcm_bt_lpm_platform_data {
 	unsigned int gpio_wake;   /* CPU -> BCM wakeup gpio */
 	unsigned int gpio_host_wake;  /* BCM -> CPU wakeup gpio */
 
-	/* Callback to request the uart driver to clock off.
-         * Called with uart spinlock held. */
-	void (*request_clock_off_locked)(struct uart_port *uport);
-	/* Callback to request the uart driver to clock on.
-         * Called with uart spinlock held. */
-	void (*request_clock_on_locked)(struct uart_port *uport);
+	/* These callbacks run in a worker, without the UART spinlock held. */
+	void (*request_clock_off)(struct uart_port *uport);
+	void (*request_clock_on)(struct uart_port *uport);
 };
 
 #endif
