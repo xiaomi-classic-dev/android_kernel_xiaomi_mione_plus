@@ -51,6 +51,7 @@
 #include <linux/input/bmc055.h>
 #include <linux/proc_fs.h>
 #include <linux/clk.h>
+#include <mach/board_mione.h>
 
 #ifdef CONFIG_ANDROID_PMEM
 #include <linux/android_pmem.h>
@@ -6223,6 +6224,8 @@ static void __init msm8x60_reserve(void)
 	msm8x60_set_display_params(prim_panel_name, ext_panel_name);
 	reserve_info = &msm8x60_reserve_info;
 	msm_reserve();
+	if (machine_is_mione())
+		mione_reserve();
 }
 
 #define EXT_CHG_VALID_MPP 10
@@ -11455,6 +11458,7 @@ static void __init msm8x60_dragon_init(void)
 
 static void __init mione_init(void)
 {
+	mione_add_ramconsole_devices();
 	msm8x60_init(&mione_board_data);
 }
 
