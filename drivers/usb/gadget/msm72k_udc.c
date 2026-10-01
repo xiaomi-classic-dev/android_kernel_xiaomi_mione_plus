@@ -296,14 +296,16 @@ static inline enum chg_type usb_get_chg_type(struct usb_info *ui)
 {
 	if ((readl(USB_PORTSC) & PORTSC_LS) == PORTSC_LS)
 		return USB_CHG_TYPE__WALLCHARGER;
-	else {
-		if (ui->gadget.speed == USB_SPEED_LOW ||
-			ui->gadget.speed == USB_SPEED_FULL ||
-			ui->gadget.speed == USB_SPEED_HIGH)
-			return USB_CHG_TYPE__SDP;
-		else
-			return USB_CHG_TYPE__INVALID;
-	}
+#ifdef CONFIG_MACH_MIONE
+	/* Original MiOne policy: no proprietary detection means a USB host. */
+	if (!ui->pdata->prop_chg)
+		return USB_CHG_TYPE__SDP;
+#endif
+	if (ui->gadget.speed == USB_SPEED_LOW ||
+		ui->gadget.speed == USB_SPEED_FULL ||
+		ui->gadget.speed == USB_SPEED_HIGH)
+		return USB_CHG_TYPE__SDP;
+	return USB_CHG_TYPE__INVALID;
 }
 
 #define USB_WALLCHARGER_CHG_CURRENT 800
@@ -332,7 +334,12 @@ static int usb_get_max_power(struct usb_info *ui)
 
 	if (temp == USB_CHG_TYPE__WALLCHARGER && !ui->proprietary_chg)
 		return USB_WALLCHARGER_CHG_CURRENT;
+#ifdef CONFIG_MACH_MIONE
+	/* Otherwise honor enumeration, suspend and the descriptor current. */
+	else if (ui->pdata->prop_chg)
+#else
 	else
+#endif
 		return USB_PROPRIETARY_CHG_CURRENT;
 
 	/* Enumeration fail and return 450mA as the wall charger type */
