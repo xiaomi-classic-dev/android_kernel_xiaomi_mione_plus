@@ -63,11 +63,15 @@ static DEFINE_PER_CPU(struct cpu_freq, cpu_freq_info);
 static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq)
 {
 	int ret = 0;
+#ifndef CONFIG_MACH_MIONE
 	int saved_sched_policy = -EINVAL;
 	int saved_sched_rt_prio = -EINVAL;
+#endif
 	struct cpufreq_freqs freqs;
 	struct cpu_freq *limit = &per_cpu(cpu_freq_info, policy->cpu);
+#ifndef CONFIG_MACH_MIONE
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
+#endif
 
 	if (limit->limits_init) {
 		if (new_freq > limit->allowed_max) {
@@ -85,6 +89,7 @@ static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq)
 	freqs.new = new_freq;
 	freqs.cpu = policy->cpu;
 
+#ifndef CONFIG_MACH_MIONE
 	/*
 	 * Put the caller into SCHED_FIFO priority to avoid cpu starvation
 	 * in the acpuclk_set_rate path while increasing frequencies
@@ -96,17 +101,22 @@ static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq)
 		sched_setscheduler_nocheck(current, SCHED_FIFO, &param);
 	}
 
+#endif
+	/* Match the original MiOne driver: retain the caller priority. */
+
 	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
 
 	ret = acpuclk_set_rate(policy->cpu, new_freq, SETRATE_CPUFREQ);
 	if (!ret)
 		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
 
+#ifndef CONFIG_MACH_MIONE
 	/* Restore priority after clock ramp-up */
 	if (freqs.new > freqs.old && saved_sched_policy >= 0) {
 		param.sched_priority = saved_sched_rt_prio;
 		sched_setscheduler_nocheck(current, saved_sched_policy, &param);
 	}
+#endif
 	return ret;
 }
 
@@ -170,11 +180,11 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 		ret = set_cpu_freq(cpu_work->policy, cpu_work->frequency);
 		goto done;
 	} else {
-		cancel_work_sync(&cpu_work->work);
+			cancel_work_sync(&cpu_work->work);
 		INIT_COMPLETION(cpu_work->complete);
-		queue_work_on(policy->cpu, msm_cpufreq_wq, &cpu_work->work);
+			queue_work_on(policy->cpu, msm_cpufreq_wq, &cpu_work->work);
 		wait_for_completion(&cpu_work->complete);
-	}
+		}
 
 	ret = cpu_work->status;
 
