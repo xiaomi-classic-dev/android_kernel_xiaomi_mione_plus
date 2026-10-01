@@ -1111,6 +1111,14 @@ config TIMERFD
 
 	  If unsure, say Y.
 
+config ALARM_TIMER
+	bool "RTC-backed alarm timers"
+	depends on RTC_CLASS
+	help
+	  Enable CLOCK_REALTIME_ALARM and CLOCK_BOOTTIME_ALARM, including
+	  timerfd wake alarms used by Android healthd. Alarm timers and the
+	  Android alarm driver use separate entries in the RTC timer queue.
+
 config EVENTFD
 	bool "Enable eventfd() system call" if EXPERT
 	select ANON_INODES
