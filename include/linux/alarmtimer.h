@@ -41,13 +41,14 @@ struct alarm {
 	void			*data;
 };
 
-void alarm_init(struct alarm *alarm, enum alarmtimer_type type,
+/* Separate symbols from the legacy Android alarm API in this kernel. */
+void alarmtimer_init(struct alarm *alarm, enum alarmtimer_type type,
 		enum alarmtimer_restart (*function)(struct alarm *, ktime_t));
-void alarm_start(struct alarm *alarm, ktime_t start);
-int alarm_try_to_cancel(struct alarm *alarm);
-int alarm_cancel(struct alarm *alarm);
+void alarmtimer_start(struct alarm *alarm, ktime_t start);
+int alarmtimer_try_to_cancel(struct alarm *alarm);
+int alarmtimer_cancel(struct alarm *alarm);
 
-u64 alarm_forward(struct alarm *alarm, ktime_t now, ktime_t interval);
+u64 alarmtimer_forward(struct alarm *alarm, ktime_t now, ktime_t interval);
 
 /*
  * A alarmtimer is active, when it is enqueued into timerqueue or the

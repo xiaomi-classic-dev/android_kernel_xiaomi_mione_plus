@@ -79,7 +79,7 @@ static int is_wakeup(enum android_alarm_type type)
 static void devalarm_start(struct devalarm *alrm, ktime_t exp)
 {
 	if (is_wakeup(alrm->type))
-		alarm_start(&alrm->u.alrm, exp);
+		alarmtimer_start(&alrm->u.alrm, exp);
 	else
 		hrtimer_start(&alrm->u.hrt, exp, HRTIMER_MODE_ABS);
 }
@@ -89,7 +89,7 @@ static int devalarm_try_to_cancel(struct devalarm *alrm)
 {
 	int ret;
 	if (is_wakeup(alrm->type))
-		ret = alarm_try_to_cancel(&alrm->u.alrm);
+		ret = alarmtimer_try_to_cancel(&alrm->u.alrm);
 	else
 		ret = hrtimer_try_to_cancel(&alrm->u.hrt);
 	return ret;
@@ -98,7 +98,7 @@ static int devalarm_try_to_cancel(struct devalarm *alrm)
 static void devalarm_cancel(struct devalarm *alrm)
 {
 	if (is_wakeup(alrm->type))
-		alarm_cancel(&alrm->u.alrm);
+		alarmtimer_cancel(&alrm->u.alrm);
 	else
 		hrtimer_cancel(&alrm->u.hrt);
 }
@@ -340,11 +340,11 @@ static int __init alarm_dev_init(void)
 	if (err)
 		return err;
 
-	alarm_init(&alarms[ANDROID_ALARM_RTC_WAKEUP].u.alrm,
+	alarmtimer_init(&alarms[ANDROID_ALARM_RTC_WAKEUP].u.alrm,
 			ALARM_REALTIME, devalarm_alarmhandler);
 	hrtimer_init(&alarms[ANDROID_ALARM_RTC].u.hrt,
 			CLOCK_REALTIME, HRTIMER_MODE_ABS);
-	alarm_init(&alarms[ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP].u.alrm,
+	alarmtimer_init(&alarms[ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP].u.alrm,
 			ALARM_BOOTTIME, devalarm_alarmhandler);
 	hrtimer_init(&alarms[ANDROID_ALARM_ELAPSED_REALTIME].u.hrt,
 			CLOCK_BOOTTIME, HRTIMER_MODE_ABS);
