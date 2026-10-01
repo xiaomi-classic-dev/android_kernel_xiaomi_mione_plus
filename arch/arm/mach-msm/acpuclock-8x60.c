@@ -154,11 +154,23 @@ struct clkctl_acpu_speed {
 		}, \
 		.num_paths = 1, \
 	}
+/* The CAF bus driver reserves usecase 0 for withdrawing a request.
+ * MiOne's L2 table uses bandwidth level 0 for a live 103 MHz minimum,
+ * so keep those logical levels and translate them to nonzero usecases.
+ */
+#ifdef CONFIG_MACH_MIONE
+#define BW_USECASE_OFFSET 1
+#else
+#define BW_USECASE_OFFSET 0
+#endif
 static struct msm_bus_paths bw_level_tbl[] = {
-	[0] =  BW_MBPS(824), /* At least 103 MHz on bus. */
-	[1] = BW_MBPS(1336), /* At least 167 MHz on bus. */
-	[2] = BW_MBPS(2008), /* At least 251 MHz on bus. */
-	[3] = BW_MBPS(2480), /* At least 310 MHz on bus. */
+#ifdef CONFIG_MACH_MIONE
+	[0] = BW_MBPS(0), /* Withdraw the request. */
+#endif
+	[0 + BW_USECASE_OFFSET] =  BW_MBPS(824), /* At least 103 MHz on bus. */
+	[1 + BW_USECASE_OFFSET] = BW_MBPS(1336), /* At least 167 MHz on bus. */
+	[2 + BW_USECASE_OFFSET] = BW_MBPS(2008), /* At least 251 MHz on bus. */
+	[3 + BW_USECASE_OFFSET] = BW_MBPS(2480), /* At least 310 MHz on bus. */
 };
 
 static struct msm_bus_scale_pdata bus_client_pdata = {
@@ -589,13 +601,14 @@ static void set_bus_bw(unsigned int bw)
 	int ret;
 
 	/* Bounds check. */
-	if (bw >= ARRAY_SIZE(bw_level_tbl)) {
+	if (bw >= ARRAY_SIZE(bw_level_tbl) - BW_USECASE_OFFSET) {
 		pr_err("%s: invalid bandwidth request (%d)\n", __func__, bw);
 		return;
 	}
 
-	/* Update bandwidth if requst has changed. This may sleep. */
-	ret = msm_bus_scale_client_update_request(bus_perf_client, bw);
+	/* Update the translated usecase. This may sleep. */
+	ret = msm_bus_scale_client_update_request(bus_perf_client,
+						bw + BW_USECASE_OFFSET);
 	if (ret)
 		pr_err("%s: bandwidth request failed (%d)\n", __func__, ret);
 
