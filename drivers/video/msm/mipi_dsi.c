@@ -95,7 +95,15 @@ static int mipi_dsi_off(struct platform_device *pdev)
 		mipi_dsi_clk_enable();
 
 		/* make sure dsi_cmd_mdp is idle */
-		mipi_dsi_cmd_mdp_busy();
+		ret = mipi_dsi_mdp_busy_wait();
+		if (ret) {
+			/* Keep the link powered while an engine may still own DMA. */
+			if (mdp_rev >= MDP_REV_41)
+				mutex_unlock(&mfd->dma->ov_mutex);
+			else
+				up(&mfd->dma->mutex);
+			return ret;
+		}
 	}
 
 	/*

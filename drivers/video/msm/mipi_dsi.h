@@ -307,7 +307,7 @@ void mipi_dsi_host_init(struct mipi_panel_info *pinfo);
 void mipi_dsi_op_mode_config(int mode);
 void mipi_dsi_cmd_mode_ctrl(int enable);
 void mdp4_dsi_cmd_trigger(void);
-void mipi_dsi_cmd_mdp_start(void);
+int mipi_dsi_cmd_mdp_start(void);
 int mipi_dsi_ctrl_lock(int mdp);
 int mipi_dsi_ctrl_lock_query(void);
 void mipi_dsi_cmd_bta_sw_trigger(void);
@@ -324,7 +324,7 @@ void mipi_dsi_pre_kickoff_del(struct dsi_kickoff_action *act);
 void mipi_dsi_post_kickoff_del(struct dsi_kickoff_action *act);
 void mipi_dsi_controller_cfg(int enable);
 void mipi_dsi_sw_reset(void);
-void mipi_dsi_mdp_busy_wait(void);
+int mipi_dsi_mdp_busy_wait(void);
 
 irqreturn_t mipi_dsi_isr(int irq, void *ptr);
 
@@ -378,8 +378,8 @@ void mipi_dsi_clk_cfg(int on);
 
 int mipi_dsi_cmdlist_put(struct dcs_cmd_req *cmdreq);
 struct dcs_cmd_req *mipi_dsi_cmdlist_get(void);
-void mipi_dsi_cmdlist_commit(int from_mdp);
-void mipi_dsi_cmd_mdp_busy(void);
+int mipi_dsi_cmdlist_commit(int from_mdp);
+int mipi_dsi_cmd_mdp_busy(void);
 void mipi_dsi_configure_fb_divider(u32 fps_level);
 void mipi_dsi_wait4video_done(void);
 

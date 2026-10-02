@@ -1527,6 +1527,7 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	init_completion(&mfd->msmfb_update_notify);
 	init_completion(&mfd->msmfb_no_update_notify);
 	init_completion(&mfd->commit_comp);
+	mutex_init(&mfd->commit_mutex);
 	mutex_init(&mfd->sync_mutex);
 	INIT_WORK(&mfd->commit_work, msm_fb_commit_wq_handler);
 	mfd->msm_fb_backup = kzalloc(sizeof(struct msm_fb_backup_type),
@@ -1943,31 +1944,27 @@ void msm_fb_release_timeline(struct msm_fb_data_type *mfd)
 DEFINE_SEMAPHORE(msm_fb_pan_sem);
 static int msm_fb_pan_idle(struct msm_fb_data_type *mfd)
 {
-	int ret = 0;
+	int ret;
 
 	mutex_lock(&mfd->sync_mutex);
-	if (mfd->is_committing) {
+	if (!mfd->is_committing) {
 		mutex_unlock(&mfd->sync_mutex);
-		ret = wait_for_completion_interruptible_timeout(
-				&mfd->commit_comp,
-			msecs_to_jiffies(WAIT_DISP_OP_TIMEOUT));
-		if (ret < 0)
-			ret = -ERESTARTSYS;
-		else if (!ret)
-			pr_err("%s wait for commit_comp timeout %d %d",
-				__func__, ret, mfd->is_committing);
-		if (ret <= 0) {
-			mutex_lock(&mfd->sync_mutex);
-			mfd->is_committing = 0;
-			complete_all(&mfd->commit_comp);
-			mutex_unlock(&mfd->sync_mutex);
-		}
-	} else {
-		mutex_unlock(&mfd->sync_mutex);
+		return 0;
 	}
-	return ret;
+	mutex_unlock(&mfd->sync_mutex);
+	ret = wait_for_completion_interruptible_timeout(&mfd->commit_comp,
+				msecs_to_jiffies(WAIT_DISP_OP_TIMEOUT));
+	if (ret < 0)
+		return ret;
+	if (!ret) {
+		/* Only the worker may retire a commit; it still owns its backup. */
+		pr_err("%s: commit timeout\n", __func__);
+		return -ETIMEDOUT;
+	}
+	return 0;
 }
-static int msm_fb_pan_display_ex(struct fb_info *info,
+
+static int msm_fb_pan_display_ex_locked(struct fb_info *info,
 		struct mdp_display_commit *disp_commit)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
@@ -2005,9 +2002,15 @@ static int msm_fb_pan_display_ex(struct fb_info *info,
 		if (var->yoffset > (info->var.yres_virtual - info->var.yres))
 			return -EINVAL;
 	}
-	msm_fb_pan_idle(mfd);
+	ret = msm_fb_pan_idle(mfd);
+	if (ret)
+		return ret;
 
 	mutex_lock(&mfd->sync_mutex);
+	if (mfd->is_committing) {
+		mutex_unlock(&mfd->sync_mutex);
+		return -EBUSY;
+	}
 
 	if (!(disp_commit->flags &
 		MDP_DISPLAY_COMMIT_OVERLAY)) {
@@ -2025,12 +2028,31 @@ static int msm_fb_pan_display_ex(struct fb_info *info,
 	memcpy(&fb_backup->info, info, sizeof(struct fb_info));
 	memcpy(&fb_backup->disp_commit, disp_commit,
 		sizeof(struct mdp_display_commit));
+	mfd->commit_result = 0;
 	mfd->is_committing = 1;
 	INIT_COMPLETION(mfd->commit_comp);
 	schedule_work(&mfd->commit_work);
 	mutex_unlock(&mfd->sync_mutex);
-	if (wait_for_finish)
-		msm_fb_pan_idle(mfd);
+	if (wait_for_finish) {
+		ret = msm_fb_pan_idle(mfd);
+		if (!ret) {
+			mutex_lock(&mfd->sync_mutex);
+			ret = mfd->commit_result;
+			mutex_unlock(&mfd->sync_mutex);
+		}
+	}
+	return ret;
+}
+
+static int msm_fb_pan_display_ex(struct fb_info *info,
+		struct mdp_display_commit *disp_commit)
+{
+	struct msm_fb_data_type *mfd = info->par;
+	int ret;
+
+	mutex_lock(&mfd->commit_mutex);
+	ret = msm_fb_pan_display_ex_locked(info, disp_commit);
+	mutex_unlock(&mfd->commit_mutex);
 	return ret;
 }
 
@@ -2177,23 +2199,27 @@ static void msm_fb_commit_wq_handler(struct work_struct *work)
 	struct fb_var_screeninfo *var;
 	struct fb_info *info;
 	struct msm_fb_backup_type *fb_backup;
+	int ret;
 
 	mfd = container_of(work, struct msm_fb_data_type, commit_work);
 	fb_backup = (struct msm_fb_backup_type *)mfd->msm_fb_backup;
 	info = &fb_backup->info;
 	if (fb_backup->disp_commit.flags &
 		MDP_DISPLAY_COMMIT_OVERLAY) {
-			mdp4_overlay_commit(info);
+		ret = mdp4_overlay_commit(info);
 	} else {
 		var = &fb_backup->disp_commit.var;
-		msm_fb_pan_display_sub(var, info);
+		ret = msm_fb_pan_display_sub(var, info);
 	}
 	mutex_lock(&mfd->sync_mutex);
+	mfd->commit_result = ret;
 	mfd->is_committing = 0;
 	complete_all(&mfd->commit_comp);
 	mutex_unlock(&mfd->sync_mutex);
 
-	if (!bl_updated)
+	if (ret)
+		pr_err("%s: display commit failed %d\n", __func__, ret);
+	if (!ret && !bl_updated)
 		schedule_delayed_work(&mfd->backlight_worker,
 					backlight_duration);
 }

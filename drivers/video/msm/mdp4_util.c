@@ -13,6 +13,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/time.h>
@@ -193,8 +194,10 @@ unsigned is_mdp4_hw_reset(void)
 	return hw_reset;
 }
 
-void mdp4_sw_reset(ulong bits)
+int mdp4_sw_reset(ulong bits)
 {
+	u32 status;
+	int ret;
 	/* MDP cmd block enable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 
@@ -202,12 +205,16 @@ void mdp4_sw_reset(ulong bits)
 	outpdw(MDP_BASE + 0x001c, bits);	/* MDP_SW_RESET */
 	wmb();
 
-	while (inpdw(MDP_BASE + 0x001c) & bits) /* self clear when complete */
-		;
+	ret = readl_poll_timeout_noirq(MDP_BASE + 0x001c, status,
+				      !(status & bits), 10000, 1);
+	if (ret)
+		pr_err("%s: reset 0x%lx timed out, status=0x%x\n",
+			__func__, bits, status);
 	/* MDP cmd block disable */
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 
 	pr_debug("mdp4_sw_reset: 0x%x\n", (int)bits);
+	return ret;
 }
 
 void mdp4_overlay_cfg(int overlayer, int blt_mode, int refresh, int direct_out)

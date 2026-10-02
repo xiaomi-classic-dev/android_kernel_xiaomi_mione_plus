@@ -444,7 +444,7 @@ struct vsync_update {
 };
 
 struct mdp4_overlay_pipe *mdp4_overlay_ndx2pipe(int ndx);
-void mdp4_sw_reset(unsigned long bits);
+int mdp4_sw_reset(unsigned long bits);
 void mdp4_display_intf_sel(int output, unsigned long intf);
 void mdp4_overlay_cfg(int layer, int blt_mode, int refresh, int direct_out);
 void mdp4_ebi2_lcd_setup(int lcd, unsigned long base, int ystride);
@@ -803,7 +803,7 @@ void mdp4_primary_vsync_dsi_video(void);
 void mdp4_dsi_cmd_base_swap(int cndx, struct mdp4_overlay_pipe *pipe);
 void mdp4_dsi_cmd_wait4vsync(int cndx);
 void mdp4_dsi_video_wait4vsync(int cndx);
-void mdp4_mixer_reset(int mixer);
+int mdp4_mixer_reset(int mixer);
 void mdp4_dsi_cmd_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe);
 void mdp4_dsi_video_pipe_queue(int cndx, struct mdp4_overlay_pipe *pipe);
 void mdp4_dsi_cmd_vsync_ctrl(struct fb_info *info, int enable);

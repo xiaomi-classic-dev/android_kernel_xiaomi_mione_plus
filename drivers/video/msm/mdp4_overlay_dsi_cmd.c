@@ -148,8 +148,8 @@ static void mdp4_dsi_cmd_blt_dmap_update(struct mdp4_overlay_pipe *pipe)
 	MDP_OUTP(MDP_BASE + 0x90008, addr);
 }
 
-static void mdp4_dsi_cmd_wait4dmap(int cndx);
-static void mdp4_dsi_cmd_wait4ov(int cndx);
+static int mdp4_dsi_cmd_wait4dmap(int cndx);
+static int mdp4_dsi_cmd_wait4ov(int cndx);
 
 static void mdp4_dsi_cmd_do_blt(struct msm_fb_data_type *mfd, int enable)
 {
@@ -171,13 +171,11 @@ static void mdp4_dsi_cmd_do_blt(struct msm_fb_data_type *mfd, int enable)
 
 	spin_lock_irqsave(&vctrl->spin_lock, flags);
 	if (enable && pipe->ov_blt_addr == 0) {
-		vctrl->blt_change++;
 		if (vctrl->dmap_koff != vctrl->dmap_done) {
 			INIT_COMPLETION(vctrl->dmap_comp);
 			need_wait = 1;
 		}
 	} else if (enable == 0 && pipe->ov_blt_addr) {
-		vctrl->blt_change++;
 		if (vctrl->ov_koff != vctrl->dmap_done) {
 			INIT_COMPLETION(vctrl->dmap_comp);
 			need_wait = 1;
@@ -185,11 +183,12 @@ static void mdp4_dsi_cmd_do_blt(struct msm_fb_data_type *mfd, int enable)
 	}
 	spin_unlock_irqrestore(&vctrl->spin_lock, flags);
 
-	if (need_wait)
-		mdp4_dsi_cmd_wait4dmap(0);
+	if (need_wait && mdp4_dsi_cmd_wait4dmap(0))
+		return;
 
 	spin_lock_irqsave(&vctrl->spin_lock, flags);
 	if (enable && pipe->ov_blt_addr == 0) {
+		vctrl->blt_change++;
 		pipe->ov_blt_addr = mfd->ov0_wb_buf->write_addr;
 		pipe->dma_blt_addr = mfd->ov0_wb_buf->read_addr;
 		pipe->ov_cnt = 0;
@@ -201,6 +200,7 @@ static void mdp4_dsi_cmd_do_blt(struct msm_fb_data_type *mfd, int enable)
 		vctrl->blt_end = 0;
 		mdp4_stat.blt_dsi_video++;
 	} else if (enable == 0 && pipe->ov_blt_addr) {
+		vctrl->blt_change++;
 		pipe->ov_blt_addr = 0;
 		pipe->dma_blt_addr =  0;
 		vctrl->blt_end = 1;
@@ -270,52 +270,16 @@ static void mdp4_dsi_cmd_pipe_clean(struct vsync_update *vp)
 static void mdp4_dsi_cmd_blt_ov_update(struct mdp4_overlay_pipe *pipe);
 static int mdp4_dsi_cmd_clk_check(struct vsycn_ctrl *vctrl);
 
-void mdp4_dsi_cmd_wait_dma_ov(void)
+static int mdp4_dsi_cmd_wait_dma_ov(void)
 {
-	struct vsycn_ctrl *vctrl = NULL;
-	struct mdp4_overlay_pipe *pipe = NULL;
-	int need_dmap_wait = 0;
-	int need_ov_wait = 0;
-	unsigned long flags;
+	int ret;
 
-	vctrl = &vsync_ctrl_db[0];
-
-	if (vctrl)
-		pipe = vctrl->base_pipe;
-
-	if (!pipe)
-		return;
-
-	spin_lock_irqsave(&vctrl->spin_lock, flags);
-	if (pipe->ov_blt_addr) {
-		/* Blt */
-		if (vctrl->blt_wait)
-			need_dmap_wait = 1;
-		if (vctrl->ov_koff != vctrl->ov_done) {
-			INIT_COMPLETION(vctrl->ov_comp);
-			need_ov_wait = 1;
-		}
-	} else {
-		/* direct out */
-		if (vctrl->dmap_koff != vctrl->dmap_done) {
-			INIT_COMPLETION(vctrl->dmap_comp);
-			pr_debug("%s: wait, ok=%d od=%d dk=%d dd=%d cpu=%d\n",
-					__func__, vctrl->ov_koff, vctrl->ov_done,
-					vctrl->dmap_koff, vctrl->dmap_done, smp_processor_id());
-			need_dmap_wait = 1;
-		}
-	}
-	spin_unlock_irqrestore(&vctrl->spin_lock, flags);
-
-	if (need_dmap_wait) {
-		pr_debug("%s: wait4dmap\n", __func__);
-		mdp4_dsi_cmd_wait4dmap(0);
-	}
-
-	if (need_ov_wait) {
-		pr_debug("%s: wait4ov\n", __func__);
-		mdp4_dsi_cmd_wait4ov(0);
-	}
+	if (!vsync_ctrl_db[0].base_pipe)
+		return 0;
+	ret = mdp4_dsi_cmd_wait4ov(0);
+	if (ret)
+		return ret;
+	return mdp4_dsi_cmd_wait4dmap(0);
 }
 
 int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
@@ -327,11 +291,12 @@ int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 	struct mdp4_overlay_pipe *pipe;
 	struct mdp4_overlay_pipe *real_pipe;
 	unsigned long flags;
-	int need_dmap_wait = 0;
-	int need_ov_wait = 0;
+	int ret;
 	int cnt = 0;
 
-	vctrl = &vsync_ctrl_db[0];
+	if (cndx < 0 || cndx >= MAX_CONTROLLER)
+		return -EINVAL;
+	vctrl = &vsync_ctrl_db[cndx];
 
 	mutex_lock(&vctrl->update_lock);
 	undx =  vctrl->update_ndx;
@@ -340,7 +305,7 @@ int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 	if (pipe == NULL) {
 		pr_err("%s: NO base pipe\n", __func__);
 		mutex_unlock(&vctrl->update_lock);
-		return 0;
+		return -ENODEV;
 	}
 
 	mixer = pipe->mixer_num;
@@ -353,57 +318,28 @@ int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 	 * overlay_unset
 	 */
 
+	/* Retain all mappings and queued pipes until the previous DMA is done. */
+	ret = mdp4_dsi_cmd_wait_dma_ov();
+	if (ret)
+		goto fail;
+	ret = mdp4_dsi_cmd_clk_check(vctrl);
+	if (ret)
+		goto fail;
+	/* Do not stage a new frame after a failed panel command/link wait. */
+	ret = mipi_dsi_cmdlist_commit(1);
+	if (ret) {
+		spin_lock_irqsave(&vctrl->spin_lock, flags);
+		vctrl->pan_display--;
+		spin_unlock_irqrestore(&vctrl->spin_lock, flags);
+		goto fail;
+	}
+
 	vctrl->update_ndx++;
 	vctrl->update_ndx &= 0x01;
-	vp->update_cnt = 0;     /* reset */
-	if (vctrl->blt_free) {
-		vctrl->blt_free--;
-		if (vctrl->blt_free == 0)
-			mdp4_free_writeback_buf(vctrl->mfd, mixer);
-	}
-
-	if (mdp4_dsi_cmd_clk_check(vctrl) < 0) {
-		mdp4_dsi_cmd_pipe_clean(vp);
-		mutex_unlock(&vctrl->update_lock);
-		return 0;
-	}
-	mutex_unlock(&vctrl->update_lock);
-
-	/* free previous committed iommu back to pool */
+	vp->update_cnt = 0;
+	if (vctrl->blt_free && --vctrl->blt_free == 0)
+		mdp4_free_writeback_buf(vctrl->mfd, mixer);
 	mdp4_overlay_iommu_unmap_freelist(mixer);
-
-	spin_lock_irqsave(&vctrl->spin_lock, flags);
-	if (pipe->ov_blt_addr) {
-		/* Blt */
-		if (vctrl->blt_wait) {
-			INIT_COMPLETION(vctrl->dmap_comp);
-			need_dmap_wait = 1;
-		}
-		if (vctrl->ov_koff != vctrl->ov_done) {
-			INIT_COMPLETION(vctrl->ov_comp);
-			need_ov_wait = 1;
-		}
-	} else {
-		/* direct out */
-		if (vctrl->dmap_koff != vctrl->dmap_done) {
-			INIT_COMPLETION(vctrl->dmap_comp);
-			pr_debug("%s: wait, ok=%d od=%d dk=%d dd=%d cpu=%d\n",
-			 __func__, vctrl->ov_koff, vctrl->ov_done,
-			vctrl->dmap_koff, vctrl->dmap_done, smp_processor_id());
-			need_dmap_wait = 1;
-		}
-	}
-	spin_unlock_irqrestore(&vctrl->spin_lock, flags);
-
-	if (need_dmap_wait) {
-		pr_debug("%s: wait4dmap\n", __func__);
-		mdp4_dsi_cmd_wait4dmap(0);
-	}
-
-	if (need_ov_wait) {
-		pr_debug("%s: wait4ov\n", __func__);
-		mdp4_dsi_cmd_wait4ov(0);
-	}
 
 	if (pipe->ov_blt_addr) {
 		if (vctrl->blt_end) {
@@ -437,9 +373,6 @@ int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 		}
 	}
 
-	/* tx dcs command if had any */
-	mipi_dsi_cmdlist_commit(1);
-
 	mdp4_mixer_stage_commit(mixer);
 
 	pipe = vctrl->base_pipe;
@@ -464,10 +397,17 @@ int mdp4_dsi_cmd_pipe_commit(int cndx, int wait)
 
 	mdp4_stat.overlay_commit[pipe->mixer_num]++;
 
+	mutex_unlock(&vctrl->update_lock);
+
 	if (wait)
 		mdp4_dsi_cmd_wait4vsync(0);
 
 	return cnt;
+fail:
+	mutex_unlock(&vctrl->update_lock);
+	pr_err("%s: commit failed %d; retaining pending buffers\n",
+		__func__, ret);
+	return ret;
 }
 
 static void mdp4_overlay_update_dsi_cmd(struct msm_fb_data_type *mfd);
@@ -540,44 +480,46 @@ void mdp4_dsi_cmd_wait4vsync(int cndx)
 	mdp4_stat.wait4vsync0++;
 }
 
-static void mdp4_dsi_cmd_wait4dmap(int cndx)
+static int mdp4_dsi_cmd_wait4dmap(int cndx)
+{
+	struct vsycn_ctrl *vctrl;
+	struct mdp4_overlay_pipe *pipe;
+
+	if (cndx < 0 || cndx >= MAX_CONTROLLER)
+		return -EINVAL;
+	vctrl = &vsync_ctrl_db[cndx];
+	pipe = vctrl->base_pipe;
+	if (!pipe)
+		return -ENODEV;
+	/* BLT may queue a second DMAP from the OV completion interrupt. */
+	if (!wait_event_timeout(vctrl->wait_queue,
+		ACCESS_ONCE(vctrl->dmap_done) == (pipe->ov_blt_addr ?
+		ACCESS_ONCE(vctrl->ov_koff) : ACCESS_ONCE(vctrl->dmap_koff)) ||
+		atomic_read(&vctrl->suspend), msecs_to_jiffies(200))) {
+		pr_err("%s: timeout ok=%u od=%u dk=%u dd=%u\n", __func__,
+			vctrl->ov_koff, vctrl->ov_done,
+			vctrl->dmap_koff, vctrl->dmap_done);
+		return -ETIMEDOUT;
+	}
+	return atomic_read(&vctrl->suspend) ? -ESHUTDOWN : 0;
+}
+
+static int mdp4_dsi_cmd_wait4ov(int cndx)
 {
 	struct vsycn_ctrl *vctrl;
 
-	if (cndx >= MAX_CONTROLLER) {
-		pr_err("%s: out or range: cndx=%d\n", __func__, cndx);
-		return;
-	}
-
+	if (cndx < 0 || cndx >= MAX_CONTROLLER)
+		return -EINVAL;
 	vctrl = &vsync_ctrl_db[cndx];
-
-	if (atomic_read(&vctrl->suspend) > 0)
-		return;
-
-	wait_for_completion(&vctrl->dmap_comp);
-}
-
-static void mdp4_dsi_cmd_wait4ov(int cndx)
-{
-	struct vsycn_ctrl *vctrl;
-
-	if (cndx >= MAX_CONTROLLER) {
-		pr_err("%s: out or range: cndx=%d\n", __func__, cndx);
-		return;
+	if (!wait_event_timeout(vctrl->wait_queue,
+		ACCESS_ONCE(vctrl->ov_done) == ACCESS_ONCE(vctrl->ov_koff) ||
+		atomic_read(&vctrl->suspend), msecs_to_jiffies(200))) {
+		pr_err("%s: timeout ok=%u od=%u\n", __func__,
+			vctrl->ov_koff, vctrl->ov_done);
+		return -ETIMEDOUT;
 	}
-
-	vctrl = &vsync_ctrl_db[cndx];
-
-	if (atomic_read(&vctrl->suspend) > 0)
-		return;
-
-	wait_for_completion(&vctrl->ov_comp);
+	return atomic_read(&vctrl->suspend) ? -ESHUTDOWN : 0;
 }
-
-/*
- * primary_rdptr_isr:
- * called from interrupt context
- */
 
 static void primary_rdptr_isr(int cndx)
 {
@@ -638,6 +580,7 @@ void mdp4_dmap_done_dsi_cmd(int cndx)
 		__func__, vctrl->ov_koff, vctrl->ov_done, vctrl->dmap_koff,
 		vctrl->dmap_done, smp_processor_id());
 	complete(&vctrl->dmap_comp);
+	wake_up_all(&vctrl->wait_queue);
 	if (mdp_rev <= MDP_REV_41)
 		mdp4_mixer_blend_cfg(MDP4_MIXER0);
 	if (diff <= 0) {
@@ -674,6 +617,7 @@ void mdp4_overlay0_done_dsi_cmd(int cndx)
 	vsync_irq_disable(INTR_OVERLAY0_DONE, MDP_OVERLAY0_TERM);
 	vctrl->ov_done++;
 	complete(&vctrl->ov_comp);
+	wake_up_all(&vctrl->wait_queue);
 	diff = vctrl->ov_done - vctrl->dmap_done;
 
 	pr_debug("%s: ov_koff=%d ov_done=%d dmap_koff=%d dmap_done=%d cpu=%d\n",
@@ -717,11 +661,17 @@ static void clk_ctrl_work(struct work_struct *work)
 	spin_lock_irqsave(&vctrl->spin_lock, flags);
 	if (vctrl->clk_control && vctrl->clk_enabled) {
 		vsync_irq_disable(INTR_PRIMARY_RDPTR, MDP_PRIM_RDPTR_TERM);
+		spin_unlock_irqrestore(&vctrl->spin_lock, flags);
+		/* make sure dsi link is idle */
+		if (mdp4_dsi_cmd_wait_dma_ov() || mipi_dsi_mdp_busy_wait()) {
+			vsync_irq_enable(INTR_PRIMARY_RDPTR, MDP_PRIM_RDPTR_TERM);
+			mutex_unlock(&vctrl->update_lock);
+			return;
+		}
+		spin_lock_irqsave(&vctrl->spin_lock, flags);
 		vctrl->clk_enabled = 0;
 		vctrl->clk_control = 0;
 		spin_unlock_irqrestore(&vctrl->spin_lock, flags);
-		/* make sure dsi link is idle */
-		mipi_dsi_mdp_busy_wait();
 		mipi_dsi_clk_cfg(0);
 		mdp_clk_ctrl(0);
 		pr_debug("%s: SET_CLK_OFF, pid=%d\n", __func__, current->pid);
@@ -1142,15 +1092,10 @@ int mdp4_dsi_cmd_off(struct platform_device *pdev)
 	struct mdp4_overlay_pipe *pipe;
 	struct vsync_update *vp;
 	int undx;
-	int need_wait, cnt;
 	unsigned long flags;
 	int mixer = 0;
 
 	pr_debug("%s+: pid=%d\n", __func__, current->pid);
-	while (atomic_read(&in_drawing)) {
-		msleep(10);
-	}
-	mdp4_dsi_cmd_wait_dma_ov();
 
 	mfd = (struct msm_fb_data_type *)platform_get_drvdata(pdev);
 
@@ -1164,41 +1109,30 @@ int mdp4_dsi_cmd_off(struct platform_device *pdev)
 		return ret;
 	}
 
-	need_wait = 0;
-	mutex_lock(&vctrl->update_lock);
-	wake_up_interruptible_all(&vctrl->wait_queue);
-
-	pr_debug("%s: clk=%d pan=%d\n", __func__,
-			vctrl->clk_enabled, vctrl->pan_display);
-	if (vctrl->clk_enabled)
-		need_wait = 1;
-	mutex_unlock(&vctrl->update_lock);
-
-	cnt = 0;
-	if (need_wait) {
-		while (vctrl->clk_enabled) {
-			msleep(20);
-			cnt++;
-			if (cnt > 10)
-				break;
-		}
+	/* ov_mutex serializes against drawing; never free active DMA buffers. */
+	ret = mdp4_dsi_cmd_wait_dma_ov();
+	if (!ret)
+		ret = mipi_dsi_mdp_busy_wait();
+	if (ret) {
+		mutex_unlock(&mfd->dma->ov_mutex);
+		return ret;
 	}
-
-	if (cnt > 10) {
-		spin_lock_irqsave(&vctrl->spin_lock, flags);
-		vctrl->clk_control = 0;
+	cancel_work_sync(&vctrl->clk_work);
+	mutex_lock(&vctrl->update_lock);
+	atomic_set(&vctrl->suspend, 1);
+	wake_up_all(&vctrl->wait_queue);
+	vsync_irq_disable(INTR_PRIMARY_RDPTR, MDP_PRIM_RDPTR_TERM);
+	vctrl->vsync_enabled = 0;
+	spin_lock_irqsave(&vctrl->spin_lock, flags);
+	vctrl->clk_control = 0;
+	vctrl->expire_tick = 0;
+	spin_unlock_irqrestore(&vctrl->spin_lock, flags);
+	if (vctrl->clk_enabled) {
 		vctrl->clk_enabled = 0;
-		vctrl->expire_tick = 0;
-		spin_unlock_irqrestore(&vctrl->spin_lock, flags);
 		mipi_dsi_clk_cfg(0);
 		mdp_clk_ctrl(0);
-		pr_err("%s: Error, SET_CLK_OFF by force\n", __func__);
 	}
-
-	if (vctrl->vsync_enabled) {
-		vsync_irq_disable(INTR_PRIMARY_RDPTR, MDP_PRIM_RDPTR_TERM);
-		vctrl->vsync_enabled = 0;
-	}
+	mutex_unlock(&vctrl->update_lock);
 
 	undx =  vctrl->update_ndx;
 	vp = &vctrl->vlist[undx];

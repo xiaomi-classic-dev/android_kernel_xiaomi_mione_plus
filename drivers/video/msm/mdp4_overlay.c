@@ -1774,10 +1774,10 @@ int mdp4_mixer_info(int mixer_num, struct mdp_mixer_info *info)
 	return cnt;
 }
 
-void mdp4_mixer_reset(int mixer)
+int mdp4_mixer_reset(int mixer)
 {
 	uint32 data, data1, mask;
-	int i, ndx, min, max, bit;
+	int i, ndx, min, max, bit, ret;
 
 	mdp_clk_ctrl(1);
 	/* MDP_LAYERMIXER_IN_CFG, shard by both mixer 0 and 1  */
@@ -1807,7 +1807,11 @@ void mdp4_mixer_reset(int mixer)
 	outpdw(MDP_BASE + 0x10100, data1); /* MDP_LAYERMIXER_IN_CFG */
 	outpdw(MDP_BASE + 0x18000, 0);
 
-	mdp4_sw_reset(bit); /* reset mixer */   /* 0 => mixer0, dmap */
+	ret = mdp4_sw_reset(bit);
+	if (ret) {
+		mdp_clk_ctrl(0);
+		return ret;
+	}
 
 	/* restore origianl stage */
 	outpdw(MDP_BASE + 0x10100, data); /* MDP_LAYERMIXER_IN_CFG */
@@ -1816,6 +1820,7 @@ void mdp4_mixer_reset(int mixer)
 	mdp4_vg_csc_restore();
 	mdp4_overlay_dmap_reconfig();
 	mdp_clk_ctrl(0);
+	return 0;
 }
 
 void mdp4_mixer_stage_commit(int mixer)
@@ -3981,7 +3986,9 @@ int mdp4_overlay_commit(struct fb_info *info)
 
 	switch (mfd->panel.type) {
 	case MIPI_CMD_PANEL:
-		mdp4_dsi_cmd_pipe_commit(0, 1);
+		ret = mdp4_dsi_cmd_pipe_commit(0, 1);
+		if (ret >= 0)
+			ret = 0;
 		break;
 	case MIPI_VIDEO_PANEL:
 		mdp4_dsi_video_pipe_commit(0, 1);
@@ -4001,10 +4008,12 @@ int mdp4_overlay_commit(struct fb_info *info)
 		ret = -EINVAL;
 		break;
 	}
-	msm_fb_signal_timeline(mfd);
+	if (!ret)
+		msm_fb_signal_timeline(mfd);
 
 	mdp4_overlay_mdp_perf_upd(mfd, 0);
-	mdp4_unmap_sec_resource(mfd);
+	if (!ret)
+		mdp4_unmap_sec_resource(mfd);
 	mutex_unlock(&mfd->dma->ov_mutex);
 
 	return ret;

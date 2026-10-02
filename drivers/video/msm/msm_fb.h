@@ -210,6 +210,8 @@ struct msm_fb_data_type {
 	struct sync_fence *last_acq_fen[MDP_MAX_FENCE_FD];
 	struct mutex sync_mutex;
 	struct completion commit_comp;
+	int commit_result;
+	struct mutex commit_mutex;
 	u32 is_committing;
 	struct work_struct commit_work;
 	void *msm_fb_backup;
