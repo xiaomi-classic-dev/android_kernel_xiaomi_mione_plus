@@ -95,10 +95,10 @@ static int uid_stat_show(struct seq_file *m, void *v)
 			continue;
 		uid_entry = find_or_register_uid(task_uid(task));
 		if (!uid_entry) {
-			read_unlock(&tasklist_lock);
-			mutex_unlock(&uid_lock);
 			pr_err("%s: failed to find the uid_entry for uid %d\n",
 						__func__, task_uid(task));
+			read_unlock(&tasklist_lock);
+			mutex_unlock(&uid_lock);
 			return -ENOMEM;
 		}
 		task_times(task, &utime, &stime);
@@ -145,12 +145,13 @@ static ssize_t uid_remove_write(struct file *file,
 {
 	struct uid_entry *uid_entry;
 	struct hlist_node *node, *tmp;
+	unsigned long bkt;
 	char uids[128];
 	char *start_uid, *end_uid = NULL;
-	long int uid_start = 0, uid_end = 0;
+	unsigned int uid_start, uid_end;
 
 	if (count >= sizeof(uids))
-		count = sizeof(uids) - 1;
+		return -EINVAL;
 
 	if (copy_from_user(uids, buffer, count))
 		return -EFAULT;
@@ -162,16 +163,16 @@ static ssize_t uid_remove_write(struct file *file,
 	if (!start_uid || !end_uid)
 		return -EINVAL;
 
-	if (kstrtol(start_uid, 10, &uid_start) != 0 ||
-		kstrtol(end_uid, 10, &uid_end) != 0) {
+	if (kstrtouint(start_uid, 10, &uid_start) != 0 ||
+		kstrtouint(end_uid, 10, &uid_end) != 0 ||
+		uid_start > uid_end) {
 		return -EINVAL;
 	}
 
 	mutex_lock(&uid_lock);
 
-	for (; uid_start <= uid_end; uid_start++) {
-		hash_for_each_possible_safe(hash_table, uid_entry, node, tmp,
-							hash, uid_start) {
+	hash_for_each_safe(hash_table, bkt, node, tmp, uid_entry, hash) {
+		if (uid_entry->uid >= uid_start && uid_entry->uid <= uid_end) {
 			hash_del(&uid_entry->hash);
 			kfree(uid_entry);
 		}
@@ -224,6 +225,9 @@ static struct notifier_block process_notifier_block = {
 
 static int __init proc_uid_cputime_init(void)
 {
+	struct proc_dir_entry *entry;
+	int ret = -ENOMEM;
+
 	hash_init(hash_table);
 
 	parent = proc_mkdir("uid_cputime", NULL);
@@ -232,15 +236,30 @@ static int __init proc_uid_cputime_init(void)
 		return -ENOMEM;
 	}
 
-	proc_create_data("remove_uid_range", S_IWUGO, parent, &uid_remove_fops,
-					NULL);
+	entry = proc_create_data("remove_uid_range", S_IWUSR | S_IWGRP,
+				parent, &uid_remove_fops, NULL);
+	if (!entry)
+		goto err_parent;
+	/* Android system_server removes accounting for uninstalled UIDs. */
+	entry->gid = 1000;
 
-	proc_create_data("show_uid_stat", S_IRUGO, parent, &uid_stat_fops,
-					NULL);
+	if (!proc_create_data("show_uid_stat", S_IRUGO, parent,
+				&uid_stat_fops, NULL))
+		goto err_remove;
 
-	profile_event_register(PROFILE_TASK_EXIT, &process_notifier_block);
+	ret = profile_event_register(PROFILE_TASK_EXIT, &process_notifier_block);
+	if (ret)
+		goto err_show;
 
 	return 0;
+
+err_show:
+	remove_proc_entry("show_uid_stat", parent);
+err_remove:
+	remove_proc_entry("remove_uid_range", parent);
+err_parent:
+	remove_proc_entry("uid_cputime", NULL);
+	return ret;
 }
 
 early_initcall(proc_uid_cputime_init);
