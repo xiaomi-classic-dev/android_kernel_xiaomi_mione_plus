@@ -2295,6 +2295,7 @@ static long msm_ioctl_server(struct file *file, void *fh,
 	struct msm_camera_info temp_cam_info;
 	struct msm_cam_config_dev_info temp_config_info;
 	struct msm_mctl_node_info temp_mctl_info;
+	size_t name_len;
 	int i;
 
 	D("%s: cmd %d\n", __func__, _IOC_NR(cmd));
@@ -2308,12 +2309,15 @@ static long msm_ioctl_server(struct file *file, void *fh,
 			return rc;
 		}
 		for (i = 0; i < g_server_dev.camera_info.num_cameras; i++) {
+			name_len = strnlen(
+				g_server_dev.camera_info.video_dev_name[i],
+				MAX_DEV_NAME_LEN);
+			if (name_len == MAX_DEV_NAME_LEN)
+				return -EINVAL;
 			if (copy_to_user((void __user *)
 				temp_cam_info.video_dev_name[i],
 				g_server_dev.camera_info.video_dev_name[i],
-				strnlen(
-				g_server_dev.camera_info.video_dev_name[i],
-				MAX_DEV_NAME_LEN))) {
+				name_len + 1)) {
 				rc = -EINVAL;
 				return rc;
 			}
@@ -2348,11 +2352,15 @@ static long msm_ioctl_server(struct file *file, void *fh,
 		}
 		for (i = 0;
 		 i < g_server_dev.config_info.num_config_nodes; i++) {
+			name_len = strnlen(
+				g_server_dev.config_info.config_dev_name[i],
+				MAX_DEV_NAME_LEN);
+			if (name_len == MAX_DEV_NAME_LEN)
+				return -EINVAL;
 			if (copy_to_user(
 			(void __user *)temp_config_info.config_dev_name[i],
 			g_server_dev.config_info.config_dev_name[i],
-			strnlen(g_server_dev.config_info.config_dev_name[i],
-			MAX_DEV_NAME_LEN))) {
+			name_len + 1)) {
 				rc = -EINVAL;
 				return rc;
 			}
@@ -2376,11 +2384,15 @@ static long msm_ioctl_server(struct file *file, void *fh,
 		}
 		for (i = 0; i < g_server_dev.mctl_node_info.num_mctl_nodes;
 				i++) {
+			name_len = strnlen(
+				g_server_dev.mctl_node_info.mctl_node_name[i],
+				MAX_DEV_NAME_LEN);
+			if (name_len == MAX_DEV_NAME_LEN)
+				return -EINVAL;
 			if (copy_to_user((void __user *)
 			temp_mctl_info.mctl_node_name[i],
-			g_server_dev.mctl_node_info.mctl_node_name[i], strnlen(
 			g_server_dev.mctl_node_info.mctl_node_name[i],
-			MAX_DEV_NAME_LEN))) {
+			name_len + 1)) {
 				rc = -EINVAL;
 				return rc;
 			}
