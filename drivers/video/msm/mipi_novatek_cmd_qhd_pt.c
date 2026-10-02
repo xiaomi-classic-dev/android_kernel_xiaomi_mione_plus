@@ -67,6 +67,7 @@ static int __init mipi_cmd_novatek_blue_qhd_pt_init(void)
 	pinfo.lcdc.v_pulse_width = 1;
 
 	pinfo.mipi.mode = DSI_CMD_MODE;
+	pinfo.mipi.frame_rate = pinfo.lcd.refx100 / 100;
 	pinfo.mipi.dst_format = DSI_CMD_DST_FORMAT_RGB888;
 	pinfo.mipi.vc = 0;
 	pinfo.mipi.rgb_swap = DSI_RGB_SWAP_BGR;
