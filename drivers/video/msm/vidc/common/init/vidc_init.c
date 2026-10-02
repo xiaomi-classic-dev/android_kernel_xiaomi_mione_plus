@@ -16,6 +16,7 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/module.h>
@@ -85,39 +86,62 @@ void vidc_debugfs_file_create(struct dentry *root, const char *name,
 }
 #endif
 
+static void vidc_timer_put(struct vidc_timer *timer)
+{
+	if (atomic_dec_and_test(&timer->refs))
+		kfree(timer);
+}
+
 static void vidc_timer_fn(unsigned long data)
 {
-	unsigned long flag;
-	struct vidc_timer *hw_timer = NULL;
-	ERR("%s() Timer expired\n", __func__);
-	spin_lock_irqsave(&vidc_spin_lock, flag);
-	hw_timer = (struct vidc_timer *)data;
-	list_add_tail(&hw_timer->list, &vidc_device_p->vidc_timer_queue);
-	spin_unlock_irqrestore(&vidc_spin_lock, flag);
-	DBG("Queue the work for timer\n");
-	queue_work(vidc_timer_wq, &vidc_device_p->vidc_timer_worker);
+	unsigned long flags;
+	struct vidc_timer *timer = (struct vidc_timer *)data;
+
+	spin_lock_irqsave(&vidc_spin_lock, flags);
+	if (!timer->released && list_empty(&timer->list)) {
+		timer->queued_generation = timer->generation;
+		atomic_inc(&timer->refs);
+		list_add_tail(&timer->list, &vidc_device_p->vidc_timer_queue);
+		queue_work(vidc_timer_wq, &vidc_device_p->vidc_timer_worker);
+	}
+	spin_unlock_irqrestore(&vidc_spin_lock, flags);
 }
+
+/* The worker reference also covers a callback waiting for dev_mutex. */
+u32 vidc_timer_callback_valid(void *timer_handle)
+{
+	struct vidc_timer *timer = timer_handle;
+	unsigned long flags;
+	bool valid;
+
+	spin_lock_irqsave(&vidc_spin_lock, flags);
+	valid = !timer->released &&
+		timer->dispatch_generation == timer->generation;
+	spin_unlock_irqrestore(&vidc_spin_lock, flags);
+	return valid;
+}
+EXPORT_SYMBOL(vidc_timer_callback_valid);
 
 static void vidc_timer_handler(struct work_struct *work)
 {
-	unsigned long flag = 0;
-	u32 islist_empty = 0;
-	struct vidc_timer *hw_timer = NULL;
+	unsigned long flags;
+	struct vidc_timer *timer;
 
-	ERR("%s() Timer expired\n", __func__);
-	do {
-		spin_lock_irqsave(&vidc_spin_lock, flag);
-		islist_empty = list_empty(&vidc_device_p->vidc_timer_queue);
-		if (!islist_empty) {
-			hw_timer = list_first_entry(
-				&vidc_device_p->vidc_timer_queue,
-				struct vidc_timer, list);
-			list_del(&hw_timer->list);
+	for (;;) {
+		spin_lock_irqsave(&vidc_spin_lock, flags);
+		if (list_empty(&vidc_device_p->vidc_timer_queue)) {
+			spin_unlock_irqrestore(&vidc_spin_lock, flags);
+			break;
 		}
-		spin_unlock_irqrestore(&vidc_spin_lock, flag);
-		if (!islist_empty && hw_timer && hw_timer->cb_func)
-			hw_timer->cb_func(hw_timer->userdata);
-	} while (!islist_empty);
+		timer = list_first_entry(&vidc_device_p->vidc_timer_queue,
+				struct vidc_timer, list);
+		list_del_init(&timer->list);
+		timer->dispatch_generation = timer->queued_generation;
+		spin_unlock_irqrestore(&vidc_spin_lock, flags);
+		if (vidc_timer_callback_valid(timer))
+			timer->cb_func(timer->userdata);
+		vidc_timer_put(timer);
+	}
 }
 
 static void vidc_work_handler(struct work_struct *work)
@@ -125,63 +149,90 @@ static void vidc_work_handler(struct work_struct *work)
 	DBG("vidc_work_handler()");
 	vcd_read_and_clear_interrupt();
 	vcd_response_handler();
-	enable_irq(vidc_device_p->irq);
+	if (!vidc_device_p->stopping)
+		enable_irq(vidc_device_p->irq);
 	DBG("vidc_work_handler() done");
 }
 
 static DECLARE_WORK(vidc_work, vidc_work_handler);
 
+static void vidc_release_resources(void)
+{
+	vidc_device_p->stopping = true;
+	if (vidc_device_p->irq_requested) {
+		disable_irq(vidc_device_p->irq);
+		cancel_work_sync(&vidc_work);
+		free_irq(vidc_device_p->irq, vidc_device_p->device);
+		vidc_device_p->irq_requested = false;
+	}
+	if (vidc_timer_wq) {
+		destroy_workqueue(vidc_timer_wq);
+		vidc_timer_wq = NULL;
+	}
+	if (vidc_wq) {
+		destroy_workqueue(vidc_wq);
+		vidc_wq = NULL;
+	}
+	if (vidc_device_p->virt_base) {
+		iounmap(vidc_device_p->virt_base);
+		vidc_device_p->virt_base = NULL;
+	}
+	vidc_device_p->device = NULL;
+}
+
 static int __devinit vidc_720p_probe(struct platform_device *pdev)
 {
 	struct resource *resource;
-	DBG("Enter %s()\n", __func__);
+	int rc;
 
-	if (pdev->id) {
-		ERR("Invalid plaform device ID = %d\n", pdev->id);
+	if (pdev->id || vidc_device_p->device)
 		return -EINVAL;
-	}
 	vidc_device_p->irq = platform_get_irq(pdev, 0);
-	if (unlikely(vidc_device_p->irq < 0)) {
-		ERR("%s(): Invalid irq = %d\n", __func__,
-					 vidc_device_p->irq);
-		return -ENXIO;
-	}
-
+	if (vidc_device_p->irq < 0)
+		return vidc_device_p->irq;
 	resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (unlikely(!resource)) {
-		ERR("%s(): Invalid resource\n", __func__);
+	if (!resource)
 		return -ENXIO;
-	}
 
 	vidc_device_p->phys_base = resource->start;
 	vidc_device_p->virt_base = ioremap(resource->start,
-	resource->end - resource->start + 1);
-
-	if (!vidc_device_p->virt_base) {
-		ERR("%s() : ioremap failed\n", __func__);
+					resource_size(resource));
+	if (!vidc_device_p->virt_base)
 		return -ENOMEM;
-	}
 	vidc_device_p->device = &pdev->dev;
 	mutex_init(&vidc_device_p->lock);
+	spin_lock_init(&vidc_spin_lock);
+	INIT_LIST_HEAD(&vidc_device_p->vidc_timer_queue);
+	INIT_WORK(&vidc_device_p->vidc_timer_worker, vidc_timer_handler);
+	vidc_device_p->stopping = true;
 
 	vidc_wq = create_singlethread_workqueue("vidc_worker_queue");
-	if (!vidc_wq) {
-		ERR("%s: create workque failed\n", __func__);
-		return -ENOMEM;
+	vidc_timer_wq = create_singlethread_workqueue("vidc_timer_wq");
+	if (!vidc_wq || !vidc_timer_wq) {
+		rc = -ENOMEM;
+		goto fail;
 	}
+	res_trk_init(&pdev->dev, vidc_device_p->irq);
+	irq_set_status_flags(vidc_device_p->irq, IRQ_NOAUTOEN);
+	rc = request_irq(vidc_device_p->irq, vidc_isr, IRQF_TRIGGER_HIGH,
+			 "vidc", &pdev->dev);
+	irq_clear_status_flags(vidc_device_p->irq, IRQ_NOAUTOEN);
+	if (rc)
+		goto fail;
+	vidc_device_p->irq_requested = true;
+	vidc_device_p->stopping = false;
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 	return 0;
+fail:
+	vidc_release_resources();
+	return rc;
 }
 
 static int __devexit vidc_720p_remove(struct platform_device *pdev)
 {
-	if (pdev->id) {
-		ERR("Invalid plaform device ID = %d\n", pdev->id);
-		return -EINVAL;
-	}
 	pm_runtime_disable(&pdev->dev);
-
+	vidc_release_resources();
 	return 0;
 }
 
@@ -214,13 +265,24 @@ static struct platform_driver msm_vidc_720p_platform_driver = {
 static void __exit vidc_exit(void)
 {
 	platform_driver_unregister(&msm_vidc_720p_platform_driver);
+	cdev_del(&vidc_device_p->cdev);
+	device_destroy(vidc_class, vidc_dev_num);
+	class_destroy(vidc_class);
+	unregister_chrdev_region(vidc_dev_num, 1);
+#ifdef VIDC_ENABLE_DBGFS
+	debugfs_remove_recursive(vidc_debugfs_root);
+	vidc_debugfs_root = NULL;
+#endif
+	kfree(vidc_device_p);
+	vidc_device_p = NULL;
 }
 
 static irqreturn_t vidc_isr(int irq, void *dev)
 {
 	DBG("\n vidc_isr() %d ", irq);
 	disable_irq_nosync(irq);
-	queue_work(vidc_wq, &vidc_work);
+	if (!vidc_device_p->stopping)
+		queue_work(vidc_wq, &vidc_work);
 	return IRQ_HANDLED;
 }
 
@@ -280,30 +342,11 @@ static int __init vidc_init(void)
 		goto error_vidc_platfom_register;
 	}
 
-	rc = request_irq(vidc_device_p->irq, vidc_isr, IRQF_TRIGGER_HIGH,
-			 "vidc", vidc_device_p->device);
-
-	if (unlikely(rc)) {
-		ERR("%s() :request_irq failed\n", __func__);
+	/* Registration can succeed even when no device probed successfully. */
+	if (!vidc_device_p->virt_base || !vidc_device_p->irq_requested) {
+		rc = -ENODEV;
 		goto error_vidc_request_irq;
 	}
-	res_trk_init(vidc_device_p->device, vidc_device_p->irq);
-	vidc_timer_wq = create_singlethread_workqueue("vidc_timer_wq");
-	if (!vidc_timer_wq) {
-		ERR("%s: create workque failed\n", __func__);
-		rc = -ENOMEM;
-		goto error_vidc_create_workqueue;
-	}
-	DBG("Disabling IRQ in %s()\n", __func__);
-	disable_irq_nosync(vidc_device_p->irq);
-	INIT_WORK(&vidc_device_p->vidc_timer_worker,
-			  vidc_timer_handler);
-	spin_lock_init(&vidc_spin_lock);
-	INIT_LIST_HEAD(&vidc_device_p->vidc_timer_queue);
-
-	vidc_device_p->ref_count = 0;
-	vidc_device_p->firmware_refcount = 0;
-	vidc_device_p->get_firmware = 0;
 #ifdef VIDC_ENABLE_DBGFS
 	root = vidc_get_debugfs_root();
 	if (root) {
@@ -317,8 +360,6 @@ static int __init vidc_init(void)
 #endif
 	return 0;
 
-error_vidc_create_workqueue:
-	free_irq(vidc_device_p->irq, vidc_device_p->device);
 error_vidc_request_irq:
 	platform_driver_unregister(&msm_vidc_720p_platform_driver);
 error_vidc_platfom_register:
@@ -331,13 +372,14 @@ error_vidc_class_create:
 	unregister_chrdev_region(vidc_dev_num, 1);
 error_vidc_alloc_chrdev_region:
 	kfree(vidc_device_p);
+	vidc_device_p = NULL;
 
 	return rc;
 }
 
 void __iomem *vidc_get_ioaddr(void)
 {
-	return (u8 *)vidc_device_p->virt_base;
+	return vidc_device_p ? vidc_device_p->virt_base : NULL;
 }
 EXPORT_SYMBOL(vidc_get_ioaddr);
 
@@ -951,7 +993,7 @@ bail_out_del:
 EXPORT_SYMBOL(vidc_delete_addr_table);
 
 u32 vidc_timer_create(void (*timer_handler)(void *),
-	void *user_data, void **timer_handle)
+		     void *user_data, void **timer_handle)
 {
 	struct vidc_timer *hw_timer = NULL;
 	if (!timer_handler || !timer_handle) {
@@ -963,41 +1005,66 @@ u32 vidc_timer_create(void (*timer_handler)(void *),
 		DBG("%s(): timer creation failed in allocation\n ", __func__);
 		return false;
 	}
+	INIT_LIST_HEAD(&hw_timer->list);
+	atomic_set(&hw_timer->refs, 1);
 	init_timer(&hw_timer->hw_timeout);
 	hw_timer->hw_timeout.data = (unsigned long)hw_timer;
 	hw_timer->hw_timeout.function = vidc_timer_fn;
 	hw_timer->cb_func = timer_handler;
-	hw_timer->userdata = user_data;
+	/* VCD uses the timer identity to validate expiry under dev_mutex. */
+	hw_timer->userdata = user_data ? user_data : hw_timer;
 	*timer_handle = hw_timer;
 	return true;
 }
 EXPORT_SYMBOL(vidc_timer_create);
 
-void  vidc_timer_release(void *timer_handle)
+void vidc_timer_stop(void *timer_handle)
 {
-	kfree(timer_handle);
+	struct vidc_timer *timer = timer_handle;
+	unsigned long flags;
+	bool queued;
+
+	if (!timer)
+		return;
+	/* timer_fn never takes dev_mutex, unlike the deferred callback. */
+	del_timer_sync(&timer->hw_timeout);
+	spin_lock_irqsave(&vidc_spin_lock, flags);
+	timer->generation++;
+	queued = !list_empty(&timer->list);
+	if (queued)
+		list_del_init(&timer->list);
+	spin_unlock_irqrestore(&vidc_spin_lock, flags);
+	if (queued)
+		vidc_timer_put(timer);
+}
+EXPORT_SYMBOL(vidc_timer_stop);
+
+void vidc_timer_release(void *timer_handle)
+{
+	struct vidc_timer *timer = timer_handle;
+	unsigned long flags;
+
+	if (!timer)
+		return;
+	spin_lock_irqsave(&vidc_spin_lock, flags);
+	timer->released = true;
+	spin_unlock_irqrestore(&vidc_spin_lock, flags);
+	vidc_timer_stop(timer);
+	vidc_timer_put(timer);
 }
 EXPORT_SYMBOL(vidc_timer_release);
 
-void  vidc_timer_start(void *timer_handle, u32 time_out)
+void vidc_timer_start(void *timer_handle, u32 time_out)
 {
-	struct vidc_timer *hw_timer = (struct vidc_timer *)timer_handle;
-	DBG("%s(): start timer\n ", __func__);
-	if (hw_timer) {
-		hw_timer->hw_timeout.expires = jiffies + 1*HZ;
-		add_timer(&hw_timer->hw_timeout);
-	}
+	struct vidc_timer *timer = timer_handle;
+
+	if (!timer)
+		return;
+	vidc_timer_stop(timer);
+	/* Preserve the existing one second hardware watchdog policy. */
+	mod_timer(&timer->hw_timeout, jiffies + HZ);
 }
 EXPORT_SYMBOL(vidc_timer_start);
-
-void  vidc_timer_stop(void *timer_handle)
-{
-	struct vidc_timer *hw_timer = (struct vidc_timer *)timer_handle;
-	DBG("%s(): stop timer\n ", __func__);
-	if (hw_timer)
-		del_timer(&hw_timer->hw_timeout);
-}
-EXPORT_SYMBOL(vidc_timer_stop);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Video decoder/encoder driver Init Module");

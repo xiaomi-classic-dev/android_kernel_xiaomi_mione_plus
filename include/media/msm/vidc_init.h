@@ -108,6 +108,7 @@ u32 vidc_timer_create(void (*timer_handler)(void *),
 void  vidc_timer_release(void *timer_handle);
 void  vidc_timer_start(void *timer_handle, u32 time_out);
 void  vidc_timer_stop(void *timer_handle);
+u32 vidc_timer_callback_valid(void *timer_handle);
 
 
 #endif

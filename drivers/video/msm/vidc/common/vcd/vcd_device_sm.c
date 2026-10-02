@@ -12,6 +12,7 @@
  */
 
 #include <media/msm/vidc_type.h>
+#include <media/msm/vidc_init.h>
 #include "vcd.h"
 
 static const struct vcd_dev_state_table *vcd_dev_state_table[];
@@ -20,8 +21,8 @@ static const struct vcd_dev_state_table vcd_dev_table_null;
 struct vcd_drv_ctxt *vcd_get_drv_context(void)
 {
 	static struct vcd_drv_ctxt drv_context = {
-		{&vcd_dev_table_null, VCD_DEVICE_STATE_NULL},
-		{0},
+		.dev_state = {&vcd_dev_table_null, VCD_DEVICE_STATE_NULL},
+		.dev_mutex = __MUTEX_INITIALIZER(drv_context.dev_mutex),
 	};
 
 	return &drv_context;
@@ -67,9 +68,20 @@ void vcd_hw_timeout_handler(void *user_data)
 	struct vcd_drv_ctxt *drv_ctxt;
 
 	VCD_MSG_HIGH("vcd_hw_timeout_handler:");
-	user_data = NULL;
 	drv_ctxt = vcd_get_drv_context();
 	mutex_lock(&drv_ctxt->dev_mutex);
+	if (drv_ctxt->dev_ctxt.config.timer_create == vidc_timer_create &&
+	    (user_data != drv_ctxt->dev_ctxt.hw_timer_handle ||
+	     !vidc_timer_callback_valid(user_data))) {
+		mutex_unlock(&drv_ctxt->dev_mutex);
+		return;
+	}
+	/* A released timer must not act on a subsequent driver context. */
+	if (!drv_ctxt->dev_ctxt.hw_timer_handle) {
+		mutex_unlock(&drv_ctxt->dev_mutex);
+		return;
+	}
+	user_data = NULL;
 	if (drv_ctxt->dev_state.state_table->ev_hdlr.timeout)
 		drv_ctxt->dev_state.state_table->ev_hdlr.
 			timeout(drv_ctxt, user_data);
@@ -576,7 +588,8 @@ static u32 vcd_init_in_null
 	if (!dev_ctxt->device_base_addr) {
 		VCD_MSG_ERROR("NULL Device_base_addr");
 
-		return VCD_ERR_FAIL;
+		rc = VCD_ERR_FAIL;
+		goto clear_context;
 	}
 
 	if (config->register_isr) {
@@ -590,33 +603,29 @@ static u32 vcd_init_in_null
 			done_create_timer = true;
 		else {
 			VCD_MSG_ERROR("timercreate failed");
-			return VCD_ERR_FAIL;
+			rc = VCD_ERR_FAIL;
+			goto unwind;
 		}
 	}
 
 
 	rc = vcd_init_cmn(drv_ctxt, config, driver_handle);
-
-	if (!VCD_FAILED(rc)) {
-		vcd_do_device_state_transition(drv_ctxt,
-						   VCD_DEVICE_STATE_NOT_INIT,
-						   DEVICE_STATE_EVENT_NUMBER
-						   (init));
-	} else {
-		if (dev_ctxt->config.un_map_dev_base_addr)
-			dev_ctxt->config.un_map_dev_base_addr();
-
-		if (dev_ctxt->config.deregister_isr)
-			dev_ctxt->config.deregister_isr();
-
-		if (done_create_timer && dev_ctxt->config.timer_release)
-			dev_ctxt->config.timer_release(dev_ctxt->
-				hw_timer_handle);
-
-	}
-
+	if (VCD_FAILED(rc))
+		goto unwind;
+	vcd_do_device_state_transition(drv_ctxt, VCD_DEVICE_STATE_NOT_INIT,
+				      DEVICE_STATE_EVENT_NUMBER(init));
 	return rc;
 
+unwind:
+	if (done_create_timer && config->timer_release)
+		config->timer_release(dev_ctxt->hw_timer_handle);
+	if (config->deregister_isr)
+		config->deregister_isr();
+	if (config->un_map_dev_base_addr)
+		config->un_map_dev_base_addr();
+clear_context:
+	memset(dev_ctxt, 0, sizeof(*dev_ctxt));
+	return rc;
 }
 
 static u32 vcd_init_in_not_init

@@ -21,6 +21,11 @@ struct vidc_timer {
 	struct timer_list hw_timeout;
 	void (*cb_func)(void *);
 	void *userdata;
+	atomic_t refs;
+	unsigned int generation;
+	unsigned int queued_generation;
+	unsigned int dispatch_generation;
+	bool released;
 };
 
 struct vidc_dev {
@@ -28,7 +33,9 @@ struct vidc_dev {
 	struct device *device;
 	resource_size_t phys_base;
 	void __iomem *virt_base;
-	unsigned int irq;
+	int irq;
+	bool irq_requested;
+	bool stopping;
 	unsigned int ref_count;
 	unsigned int firmware_refcount;
 	unsigned int get_firmware;

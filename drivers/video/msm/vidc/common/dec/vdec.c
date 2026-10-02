@@ -45,6 +45,7 @@
 
 static char *node_name[2] = {"", "_sec"};
 static struct vid_dec_dev *vid_dec_device_p;
+static bool vid_dec_ready;
 static dev_t vid_dec_dev_num;
 static struct class *vid_dec_class;
 
@@ -2709,6 +2710,9 @@ static int vid_dec_open_secure(struct inode *inode, struct file *file)
 {
 	int rc = 0, close_client = 0;
 	struct video_client_ctx *client_ctx;
+	if (!ACCESS_ONCE(vid_dec_ready))
+		return -ENODEV;
+	smp_rmb();
 	mutex_lock(&vid_dec_device_p->lock);
 	rc = vid_dec_open_client(&client_ctx, VCD_CP_SESSION);
 	if (rc)
@@ -2741,6 +2745,9 @@ static int vid_dec_open(struct inode *inode, struct file *file)
 	int rc = 0;
 	struct video_client_ctx *client_ctx;
 	INFO("msm_vidc_dec: Inside %s()", __func__);
+	if (!ACCESS_ONCE(vid_dec_ready))
+		return -ENODEV;
+	smp_rmb();
 	mutex_lock(&vid_dec_device_p->lock);
 	rc = vid_dec_open_client(&client_ctx, 0);
 	if (rc) {
@@ -2825,7 +2832,7 @@ void *vid_dec_map_dev_base_addr(void *device_name)
 static int vid_dec_vcd_init(void)
 {
 	int rc;
-	struct vcd_init_config vcd_init_config;
+	struct vcd_init_config vcd_init_config = {0};
 	u32 i;
 
 	/* init_timer(&hw_timer); */
@@ -2868,88 +2875,79 @@ static int vid_dec_vcd_init(void)
 
 static int __init vid_dec_init(void)
 {
-	int rc = 0, i = 0, j = 0;
+	int rc, i, devices = 0, cdevs = 0;
 	struct device *class_devp;
 
-	DBG("msm_vidc_dec: Inside %s()", __func__);
-	vid_dec_device_p = kzalloc(sizeof(struct vid_dec_dev), GFP_KERNEL);
-	if (!vid_dec_device_p) {
-		ERR("%s Unable to allocate memory for vid_dec_dev\n",
-		       __func__);
+	vid_dec_device_p = kzalloc(sizeof(*vid_dec_device_p), GFP_KERNEL);
+	if (!vid_dec_device_p)
 		return -ENOMEM;
-	}
-
 	rc = alloc_chrdev_region(&vid_dec_dev_num, 0, NUM_OF_DRIVER_NODES,
-		VID_DEC_NAME);
-	if (rc < 0) {
-		ERR("%s: alloc_chrdev_region Failed rc = %d\n",
-		       __func__, rc);
-		goto error_vid_dec_alloc_chrdev_region;
-	}
+				VID_DEC_NAME);
+	if (rc)
+		goto free_device;
 
+	/* Do not expose a node whose shared VCD instance is not ready. */
+	rc = vid_dec_vcd_init();
+	if (rc)
+		goto unregister_region;
 	vid_dec_class = class_create(THIS_MODULE, VID_DEC_NAME);
 	if (IS_ERR(vid_dec_class)) {
 		rc = PTR_ERR(vid_dec_class);
-		ERR("%s: couldn't create vid_dec_class rc = %d\n",
-		       __func__, rc);
-
-		goto error_vid_dec_class_create;
+		goto terminate_vcd;
 	}
 	for (i = 0; i < NUM_OF_DRIVER_NODES; i++) {
 		class_devp = device_create(vid_dec_class, NULL,
-						(vid_dec_dev_num + i),
-						NULL, VID_DEC_NAME "%s",
-						node_name[i]);
-
+				vid_dec_dev_num + i, NULL,
+				VID_DEC_NAME "%s", node_name[i]);
 		if (IS_ERR(class_devp)) {
 			rc = PTR_ERR(class_devp);
-			ERR("%s: class device_create failed %d\n",
-				   __func__, rc);
-			if (!i)
-				goto error_vid_dec_class_device_create;
-			else
-				goto error_vid_dec_cdev_add;
+			goto remove_nodes;
 		}
-
-	  vid_dec_device_p->device[i] = class_devp;
-
+		vid_dec_device_p->device[i] = class_devp;
+		devices++;
 		cdev_init(&vid_dec_device_p->cdev[i], &vid_dec_fops[i]);
 		vid_dec_device_p->cdev[i].owner = THIS_MODULE;
-		rc = cdev_add(&(vid_dec_device_p->cdev[i]),
-				(vid_dec_dev_num+i), 1);
-
-		if (rc < 0) {
-			ERR("%s: cdev_add failed %d\n", __func__, rc);
-			goto error_vid_dec_cdev_add;
-		}
+		rc = cdev_add(&vid_dec_device_p->cdev[i],
+				vid_dec_dev_num + i, 1);
+		if (rc)
+			goto remove_nodes;
+		cdevs++;
 	}
-	rc = vid_dec_vcd_init();
-	return rc;
+	smp_wmb();
+	ACCESS_ONCE(vid_dec_ready) = true;
+	return 0;
 
-error_vid_dec_cdev_add:
-	for (j = i-1; j >= 0; j--)
-		cdev_del(&(vid_dec_device_p->cdev[j]));
-	device_destroy(vid_dec_class, vid_dec_dev_num);
-error_vid_dec_class_device_create:
+remove_nodes:
+	while (cdevs-- > 0)
+		cdev_del(&vid_dec_device_p->cdev[cdevs]);
+	while (devices-- > 0)
+		device_destroy(vid_dec_class, vid_dec_dev_num + devices);
 	class_destroy(vid_dec_class);
-error_vid_dec_class_create:
+terminate_vcd:
+	vcd_term(vid_dec_device_p->device_handle);
+unregister_region:
 	unregister_chrdev_region(vid_dec_dev_num, NUM_OF_DRIVER_NODES);
-error_vid_dec_alloc_chrdev_region:
+free_device:
 	kfree(vid_dec_device_p);
+	vid_dec_device_p = NULL;
 	return rc;
 }
 
 static void __exit vid_dec_exit(void)
 {
-	int i = 0;
-	INFO("msm_vidc_dec: Inside %s()", __func__);
-	for (i = 0; i < NUM_OF_DRIVER_NODES; i++)
-		cdev_del(&(vid_dec_device_p->cdev[i]));
-	device_destroy(vid_dec_class, vid_dec_dev_num);
+	int i;
+
+	ACCESS_ONCE(vid_dec_ready) = false;
+
+	for (i = NUM_OF_DRIVER_NODES - 1; i >= 0; i--) {
+		cdev_del(&vid_dec_device_p->cdev[i]);
+		device_destroy(vid_dec_class, vid_dec_dev_num + i);
+	}
+	vcd_term(vid_dec_device_p->device_handle);
 	class_destroy(vid_dec_class);
 	unregister_chrdev_region(vid_dec_dev_num, NUM_OF_DRIVER_NODES);
 	kfree(vid_dec_device_p);
-	DBG("msm_vidc_dec: Return from %s()", __func__);
+	vid_dec_device_p = NULL;
 }
 
 MODULE_LICENSE("GPL v2");

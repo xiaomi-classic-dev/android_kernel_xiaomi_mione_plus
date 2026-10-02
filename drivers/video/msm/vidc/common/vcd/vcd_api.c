@@ -31,7 +31,6 @@ u32 vcd_init(struct vcd_init_config *config, s32 *driver_handle)
 	}
 
 	drv_ctxt = vcd_get_drv_context();
-	mutex_init(&drv_ctxt->dev_mutex);
 	mutex_lock(&drv_ctxt->dev_mutex);
 
 	if (drv_ctxt->dev_state.state_table->ev_hdlr.init) {
