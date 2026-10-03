@@ -58,6 +58,7 @@
 #include <linux/static_key.h>
 #include <linux/aio.h>
 #include <linux/sched.h>
+#include <linux/cgroup-defs.h>
 
 #include <linux/filter.h>
 #include <linux/rculist_nulls.h>
@@ -171,6 +172,7 @@ struct sock_common {
 #ifdef CONFIG_NET_NS
 	struct net	 	*skc_net;
 #endif
+	atomic64_t		skc_cookie;
 	/*
 	 * fields between dontcopy_begin/dontcopy_end
 	 * are not copied in sock_copy()
@@ -252,7 +254,7 @@ struct cg_proto;
   *	@sk_send_head: front of stuff to transmit
   *	@sk_security: used by security modules
   *	@sk_mark: generic packet mark
-  *	@sk_classid: this socket's cgroup classid
+  *	@sk_cgrp_data: cgroup data for this cgroup
   *	@sk_cgrp: this socket's cgroup-specific proto data
   *	@sk_write_pending: a write to stream socket waits to start
   *	@sk_state_change: callback to indicate change in the state of the sock
@@ -261,6 +263,7 @@ struct cg_proto;
   *	@sk_error_report: callback to indicate errors (e.g. %MSG_ERRQUEUE)
   *	@sk_backlog_rcv: callback to process the backlog
   *	@sk_destruct: called at sock freeing time, i.e. when all refcnt == 0
+  *	@sk_reuseport_cb: reuseport group container
  */
 struct sock {
 	/*
@@ -283,6 +286,7 @@ struct sock {
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_prot			__sk_common.skc_prot
 #define sk_net			__sk_common.skc_net
+#define sk_cookie		__sk_common.skc_cookie
 	socket_lock_t		sk_lock;
 	struct sk_buff_head	sk_receive_queue;
 	/*
@@ -372,6 +376,7 @@ struct sock {
 #endif
 	__u32			sk_mark;
 	u32			sk_classid;
+	struct sock_cgroup_data	sk_cgrp_data;
 	struct cg_proto		*sk_cgrp;
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk, int bytes);
@@ -380,6 +385,7 @@ struct sock {
   	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);  
 	void                    (*sk_destruct)(struct sock *sk);
+	struct sock_reuseport __rcu	*sk_reuseport_cb;
 };
 
 static inline int sk_peek_offset(struct sock *sk, int flags)
@@ -989,6 +995,16 @@ static inline struct cg_proto *parent_cg_proto(struct proto *proto,
 }
 #endif
 
+static inline int sk_under_cgroup_hierarchy(struct sock *sk,
+                                           struct cgroup *ancestor)
+{
+#ifdef CONFIG_SOCK_CGROUP_DATA
+       return cgroup_is_descendant(sock_cgroup_ptr(&sk->sk_cgrp_data),
+                                   ancestor);
+#else
+       return -ENOTSUPP;
+#endif
+}
 
 static inline bool sk_has_memory_pressure(const struct sock *sk)
 {
@@ -1499,34 +1515,6 @@ extern void sk_common_release(struct sock *sk);
 /* Initialise core socket variables */
 extern void sock_init_data(struct socket *sock, struct sock *sk);
 
-extern void sk_filter_release_rcu(struct rcu_head *rcu);
-
-/**
- *	sk_filter_release - release a socket filter
- *	@fp: filter to remove
- *
- *	Remove a filter from a socket and release its resources.
- */
-
-static inline void sk_filter_release(struct sk_filter *fp)
-{
-	if (atomic_dec_and_test(&fp->refcnt))
-		call_rcu(&fp->rcu, sk_filter_release_rcu);
-}
-
-static inline void sk_filter_uncharge(struct sock *sk, struct sk_filter *fp)
-{
-	unsigned int size = sk_filter_len(fp);
-
-	atomic_sub(size, &sk->sk_omem_alloc);
-	sk_filter_release(fp);
-}
-
-static inline void sk_filter_charge(struct sock *sk, struct sk_filter *fp)
-{
-	atomic_inc(&fp->refcnt);
-	atomic_add(sk_filter_len(fp), &sk->sk_omem_alloc);
-}
 
 /*
  * Socket reference counting postulates.
@@ -1623,6 +1611,7 @@ static inline kuid_t sock_net_uid(const struct net *net, const struct sock *sk)
 {
 	return sk ? sk->sk_uid : make_kuid(net->user_ns, 0);
 }
+
 
 static inline struct dst_entry *
 __sk_dst_get(struct sock *sk)
