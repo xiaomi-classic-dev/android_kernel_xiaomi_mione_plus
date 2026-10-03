@@ -285,6 +285,10 @@ static int validate_rulemsg(struct fib_rule_hdr *frh, struct nlattr **tb,
 {
 	int err = -EINVAL;
 
+	if (tb[FRA_UID_RANGE] &&
+	    nla_len(tb[FRA_UID_RANGE]) != sizeof(struct fib_rule_uid_range))
+		goto errout;
+
 	if (frh->src_len)
 		if (tb[FRA_SRC] == NULL ||
 		    frh->src_len > (ops->addr_size * 8) ||
@@ -495,8 +499,10 @@ static int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 
 	if (tb[FRA_UID_RANGE]) {
 		range = nla_get_kuid_range(tb);
-		if (!uid_range_set(&range))
+		if (!uid_range_set(&range) || !uid_lte(range.start, range.end)) {
+			err = -EINVAL;
 			goto errout;
+		}
 	} else {
 		range = fib_kuid_range_unset;
 	}
@@ -647,8 +653,9 @@ static int fib_nl_fill_rule(struct sk_buff *skb, struct fib_rule *rule,
 	if (rule->target)
 		NLA_PUT_U32(skb, FRA_GOTO, rule->target);
 
-	if (uid_range_set(&rule->uid_range))
-		nla_put_uid_range(skb, &rule->uid_range);
+	if (uid_range_set(&rule->uid_range) &&
+	    nla_put_uid_range(skb, &rule->uid_range) < 0)
+		goto nla_put_failure;
 
 	if (ops->fill(rule, skb, frh) < 0)
 		goto nla_put_failure;
