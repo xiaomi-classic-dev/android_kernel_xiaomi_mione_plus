@@ -202,6 +202,7 @@ int fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst, u8 tos,
 
 	fl4.flowi4_oif = 0;
 	fl4.flowi4_iif = oif;
+	fl4.flowi4_uid = GLOBAL_ROOT_UID;
 	fl4.daddr = src;
 	fl4.saddr = dst;
 	fl4.flowi4_tos = tos;
