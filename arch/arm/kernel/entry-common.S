@@ -95,9 +95,9 @@ ENTRY(ret_from_fork)
 	mov	why, #1
 	tst	r1, #_TIF_SYSCALL_WORK		@ are we tracing syscalls?
 	beq	ret_slow_syscall
-	mov	r1, sp
-	mov	r0, #1				@ trace exit [IP = 1]
-	bl	syscall_trace
+	ldr	r1, [tsk, #TI_SYSCALL]		@ inherited syscall number
+	mov	r0, sp
+	bl	syscall_trace_exit
 	b	ret_slow_syscall
 ENDPROC(ret_from_fork)
 
@@ -645,4 +645,3 @@ ENTRY(sys_oabi_call_table)
 #undef OBSOLETE
 
 #endif
-
