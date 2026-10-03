@@ -164,6 +164,107 @@ void ftrace_likely_update(struct ftrace_branch_data *f, int val, int expect);
     (typeof(ptr)) (__ptr + (off)); })
 #endif
 
+#include <linux/types.h>
+
+static __always_inline void data_access_exceeds_word_size(void)
+#ifdef __compiletime_warning
+__compiletime_warning("data access exceeds word size and won't be atomic")
+#endif
+;
+
+static __always_inline void data_access_exceeds_word_size(void)
+{
+}
+
+static __always_inline void __read_once_size(volatile void *p, void *res, int size)
+{
+	switch (size) {
+	case 1: *(__u8 *)res = *(volatile __u8 *)p; break;
+	case 2: *(__u16 *)res = *(volatile __u16 *)p; break;
+	case 4: *(__u32 *)res = *(volatile __u32 *)p; break;
+	default:
+		barrier();
+		__builtin_memcpy((void *)res, (const void *)p, size);
+		data_access_exceeds_word_size();
+		barrier();
+	}
+}
+
+static __always_inline void __assign_once_size(volatile void *p, void *res, int size)
+{
+	switch (size) {
+	case 1: *(volatile __u8 *)p = *(__u8 *)res; break;
+	case 2: *(volatile __u16 *)p = *(__u16 *)res; break;
+	case 4: *(volatile __u32 *)p = *(__u32 *)res; break;
+	default:
+		barrier();
+		__builtin_memcpy((void *)p, (const void *)res, size);
+		data_access_exceeds_word_size();
+		barrier();
+	}
+}
+
+/* Is this type a native word size -- useful for atomic operations */
+#ifndef __native_word
+# define __native_word(t) (sizeof(t) == sizeof(int) || sizeof(t) == sizeof(long))
+#endif
+
+#define __compiletime_assert(condition, msg, prefix, suffix)		\
+	do {								\
+		bool __cond = !(condition);				\
+		extern void prefix ## suffix(void) __compiletime_error(msg); \
+		if (__cond)						\
+			prefix ## suffix();				\
+		__compiletime_error_fallback(__cond);			\
+	} while (0)
+
+#define _compiletime_assert(condition, msg, prefix, suffix) \
+	__compiletime_assert(condition, msg, prefix, suffix)
+
+/**
+ * compiletime_assert - break build and emit msg if condition is false
+ * @condition: a compile-time constant condition to check
+ * @msg:       a message to emit if condition is false
+ *
+ * In tradition of POSIX assert, this macro will break the build if the
+ * supplied condition is *false*, emitting the supplied error message if the
+ * compiler has support to do so.
+ */
+#define compiletime_assert(condition, msg) \
+	_compiletime_assert(condition, msg, __compiletime_assert_, __LINE__)
+
+#define compiletime_assert_atomic_type(t)				\
+	compiletime_assert(__native_word(t),				\
+		"Need native word sized stores/loads for atomicity.")
+
+/*
+ * Prevent the compiler from merging or refetching reads or writes. The
+ * compiler is also forbidden from reordering successive instances of
+ * READ_ONCE, ASSIGN_ONCE and ACCESS_ONCE (see below), but only when the
+ * compiler is aware of some particular ordering.  One way to make the
+ * compiler aware of ordering is to put the two invocations of READ_ONCE,
+ * ASSIGN_ONCE or ACCESS_ONCE() in different C statements.
+ *
+ * In contrast to ACCESS_ONCE these two macros will also work on aggregate
+ * data types like structs or unions. If the size of the accessed data
+ * type exceeds the word size of the machine (e.g., 32 bits or 64 bits)
+ * READ_ONCE() and ASSIGN_ONCE()  will fall back to memcpy and print a
+ * compile-time warning.
+ *
+ * Their two major use cases are: (1) Mediating communication between
+ * process-level code and irq/NMI handlers, all running on the same CPU,
+ * and (2) Ensuring that the compiler does not  fold, spindle, or otherwise
+ * mutilate accesses that either do not require ordering or that interact
+ * with an explicit memory barrier or atomic instruction that provides the
+ * required ordering.
+ */
+
+#define READ_ONCE(x) \
+	({ typeof(x) __val; __read_once_size(&x, &__val, sizeof(__val)); __val; })
+
+#define ASSIGN_ONCE(val, x) \
+	({ typeof(x) __val; __val = val; __assign_once_size(&x, &__val, sizeof(__val)); __val; })
+
 #endif /* __KERNEL__ */
 
 #endif /* __ASSEMBLY__ */
@@ -293,6 +394,10 @@ void ftrace_likely_update(struct ftrace_branch_data *f, int val, int expect);
 #ifndef __compiletime_error
 # define __compiletime_error(message)
 #endif
+#ifndef __compiletime_error_fallback
+#define __compiletime_error_fallback(condition) \
+ do { ((void)sizeof(char[1 - 2 * (condition)])); } while (0)
+#endif
 #ifndef __linktime_error
 # define __linktime_error(message)
 #endif
@@ -309,5 +414,7 @@ void ftrace_likely_update(struct ftrace_branch_data *f, int val, int expect);
  * handlers, all running on the same CPU.
  */
 #define ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
+
+#define WRITE_ONCE(x, val) ASSIGN_ONCE(val, x)
 
 #endif /* __LINUX_COMPILER_H */
