@@ -22,9 +22,6 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/input/lis3dh_mione.h>
-#ifdef CONFIG_SENSORS_LIS3DH_EARLYSUSPEND_MIONE
-#include <linux/earlysuspend.h>
-#endif
 
 /* lis3dh register list */
 #define LIS3DH_STATUS_REG_AUX				0x07
@@ -147,9 +144,6 @@ struct lis3dh_data {
 	struct mutex		mutex;
 	struct input_dev	*input;
 	struct i2c_client	*client;
-#ifdef CONFIG_SENSORS_LIS3DH_EARLYSUSPEND_MIONE
-	struct early_suspend	early_suspend;
-#endif
 	bool			opened;
 	bool			enabled;
 	bool			mode_6d;
@@ -735,7 +729,7 @@ static int lis3dh_teardown(struct lis3dh_data *data)
 		return 0;
 }
 
-#if defined(CONFIG_PM) || defined(CONFIG_SENSORS_LIS3DH_EARLYSUSPEND_MIONE)
+#if defined(CONFIG_PM) || defined(0)
 static int lis3dh_suspend(struct device *dev)
 {
 	int			error = 0;
@@ -765,28 +759,11 @@ static int lis3dh_resume(struct device *dev)
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops lis3dh_pm_ops = {
-#ifndef CONFIG_SENSORS_LIS3DH_EARLYSUSPEND_MIONE
 	.suspend	= lis3dh_suspend,
 	.resume		= lis3dh_resume,
-#endif
 };
 #endif
 
-#ifdef CONFIG_SENSORS_LIS3DH_EARLYSUSPEND_MIONE
-static void lis3dh_early_suspend(struct early_suspend *h)
-{
-	struct lis3dh_data *data = container_of(h,
-			struct lis3dh_data, early_suspend);
-	lis3dh_suspend(&data->client->dev);
-}
-
-static void lis3dh_early_resume(struct early_suspend *h)
-{
-	struct lis3dh_data *data = container_of(h,
-			struct lis3dh_data, early_suspend);
-	lis3dh_resume(&data->client->dev);
-}
-#endif
 
 static int lis3dh_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
@@ -903,12 +880,6 @@ static int lis3dh_probe(struct i2c_client *client,
 		goto exit_free_phys;
 	}
 
-#ifdef CONFIG_SENSORS_LIS3DH_EARLYSUSPEND_MIONE
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	data->early_suspend.suspend = lis3dh_early_suspend;
-	data->early_suspend.resume = lis3dh_early_resume;
-	register_early_suspend(&data->early_suspend);
-#endif
 
 	goto exit; /* all is fine */
 
@@ -932,9 +903,6 @@ static int lis3dh_remove(struct i2c_client *client)
 	struct lis3dh_data *data;
 	data = i2c_get_clientdata(client);
 
-#ifdef CONFIG_SENSORS_LIS3DH_EARLYSUSPEND_MIONE
-	unregister_early_suspend(&data->early_suspend);
-#endif
 
 	free_irq(client->irq, data);
 

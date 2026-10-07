@@ -1395,13 +1395,6 @@ VOS_STATUS vos_watchdog_chip_reset ( vos_chip_reset_reason_type  reason )
         return VOS_STATUS_E_FAILURE;    
     }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-    if(VOS_STATUS_SUCCESS != hdd_wlan_reset_initialization())
-    {
-       /* This can fail if card got removed by SDCC during resume */
-       VOS_ASSERT(0);
-    }
-#endif
 
     /* Update Reset Statistics */
     pResetStats = &pHddCtx->hddChipResetStats;
@@ -2055,12 +2048,6 @@ VOS_STATUS vos_watchdog_wlan_shutdown(void)
     }
     /* Update Riva Reset Statistics */
     pHddCtx->hddRivaResetStats++;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-    if(VOS_STATUS_SUCCESS != hdd_wlan_reset_initialization())
-    {
-       VOS_ASSERT(0);
-    }
-#endif
 
     set_bit(WD_WLAN_SHUTDOWN_EVENT_MASK, &gpVosWatchdogContext->wdEventFlag);
     set_bit(WD_POST_EVENT_MASK, &gpVosWatchdogContext->wdEventFlag);

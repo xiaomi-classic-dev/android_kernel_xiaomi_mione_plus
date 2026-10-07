@@ -34,7 +34,6 @@
 #include <linux/wakelock.h>
 #include <asm/mach-types.h>
 #include <mach/htc_pwrsink.h>
-#include <linux/earlysuspend.h>
 #include <linux/bma150.h>
 #include <linux/lightsensor.h>
 #include <asm/mach/mmc.h>
@@ -259,8 +258,6 @@ struct microp_i2c_client_data {
 	struct microp_i2c_work work;
 	struct delayed_work hpin_debounce_work;
 	struct delayed_work ls_read_work;
-	struct early_suspend early_suspend;
-	uint8_t enable_early_suspend;
 	uint8_t enable_reset_button;
 	int microp_is_suspend;
 	int auto_backlight_enabled;
@@ -1859,56 +1856,6 @@ exit:
 	return ret;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-void microp_early_suspend(struct early_suspend *h)
-{
-	struct microp_i2c_client_data *cdata;
-	struct i2c_client *client = private_microp_client;
-	int ret;
-
-	if (!client) {
-		pr_err("%s: dataset: client is empty\n", __func__);
-		return;
-	}
-	cdata = i2c_get_clientdata(client);
-
-	cdata->microp_is_suspend = 1;
-
-	disable_irq(client->irq);
-	ret = cancel_work_sync(&cdata->work.work);
-	if (ret != 0) {
-		enable_irq(client->irq);
-	}
-
-	if (cdata->auto_backlight_enabled)
-		microp_i2c_auto_backlight_mode(client, 0);
-	if (cdata->light_sensor_enabled == 1) {
-		gpio_set_value(MAHIMAHI_GPIO_LS_EN_N, 1);
-		cdata->light_sensor_enabled = 0;
-	}
-}
-
-void microp_early_resume(struct early_suspend *h)
-{
-	struct i2c_client *client = private_microp_client;
-	struct microp_i2c_client_data *cdata;
-
-	if (!client) {
-		pr_err("%s: dataset: client is empty\n", __func__);
-		return;
-	}
-	cdata = i2c_get_clientdata(client);
-
-	gpio_set_value(MAHIMAHI_GPIO_LS_EN_N, 0);
-	cdata->light_sensor_enabled = 1;
-
-	if (cdata->auto_backlight_enabled)
-		microp_i2c_auto_backlight_mode(client, 1);
-
-	cdata->microp_is_suspend = 0;
-	enable_irq(client->irq);
-}
-#endif
 
 static int microp_i2c_suspend(struct i2c_client *client,
 	pm_message_t mesg)
@@ -2099,15 +2046,6 @@ static int microp_i2c_probe(struct i2c_client *client,
 		goto err_intr;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	if (cdata->enable_early_suspend) {
-		cdata->early_suspend.level =
-				EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-		cdata->early_suspend.suspend = microp_early_suspend;
-		cdata->early_suspend.resume = microp_early_resume;
-		register_early_suspend(&cdata->early_suspend);
-	}
-#endif
 
 	ret = microp_function_initialize(client);
 	if (ret) {
@@ -2170,11 +2108,6 @@ static int __devexit microp_i2c_remove(struct i2c_client *client)
 		cancel_work_sync(&ldata->brightness_work);
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	if (cdata->enable_early_suspend) {
-		unregister_early_suspend(&cdata->early_suspend);
-	}
-#endif
 
 	for (i = 0; i < ARRAY_SIZE(microp_leds); ++i) {
 		if (!cdata->leds[i].ldev.name)

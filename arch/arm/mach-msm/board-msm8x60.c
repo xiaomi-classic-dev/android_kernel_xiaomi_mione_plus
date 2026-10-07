@@ -647,8 +647,7 @@ static struct platform_device qcedev_device = {
 };
 #endif
 
-#if defined(CONFIG_HAPTIC_ISA1200_MIONE) || \
-		defined(CONFIG_HAPTIC_ISA1200_MODULE)
+#if defined(CONFIG_HAPTIC_ISA1200) ||  defined(CONFIG_HAPTIC_ISA1200_MODULE)
 #define GPIO_HAP_LENABLE   24	/* HAPTIC_LEN */
 #define GPIO_HAP_HENABLE   25	/* HAPTIC_HEN */
 
@@ -8132,8 +8131,7 @@ static struct i2c_registry msm8x60_i2c_devices[] __initdata = {
 		ARRAY_SIZE(isl_charger_i2c_info),
 	},
 #endif
-#if defined(CONFIG_HAPTIC_ISA1200_MIONE) || \
-		defined(CONFIG_HAPTIC_ISA1200_MODULE)
+#if defined(CONFIG_HAPTIC_ISA1200) ||  defined(CONFIG_HAPTIC_ISA1200_MODULE)
 	{
 	 I2C_FLUID | I2C_SURF | I2C_FFA,
 	 MSM_GSBI3_QUP_I2C_BUS_ID,

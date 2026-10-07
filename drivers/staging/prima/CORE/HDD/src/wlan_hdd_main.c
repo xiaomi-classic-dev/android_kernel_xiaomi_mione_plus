@@ -285,12 +285,6 @@ struct notifier_block hdd_netdev_notifier = {
  *   Function definitions
  *-------------------------------------------------------------------------*/
 extern int isWDresetInProgress(void);
-#ifdef CONFIG_HAS_EARLYSUSPEND
-extern void register_wlan_suspend(void);
-extern void unregister_wlan_suspend(void);
-void hdd_unregister_mcast_bcast_filter(hdd_context_t *pHddCtx);
-void hdd_register_mcast_bcast_filter(hdd_context_t *pHddCtx);
-#endif
 //variable to hold the insmod parameters
 static int con_mode = 0;
 #ifndef MODULE
@@ -2697,13 +2691,6 @@ void hdd_wlan_exit(hdd_context_t *pHddCtx)
    //netif_tx_disable(pWlanDev);
    //netif_carrier_off(pWlanDev);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-   // unregister suspend/resume callbacks
-   if(pHddCtx->cfg_ini->nEnableSuspend)
-   {
-      unregister_wlan_suspend();
-   }
-#endif
 
 #ifdef FEATURE_WLAN_INTEGRATED_SOC
 #ifdef WLAN_SOFTAP_FEATURE
@@ -2892,9 +2879,6 @@ void hdd_wlan_exit(hdd_context_t *pHddCtx)
    nl_srv_exit();
 
    //This requires pMac access, Call this before vos_close().
-#ifdef CONFIG_HAS_EARLYSUSPEND
-   hdd_unregister_mcast_bcast_filter(pHddCtx);
-#endif
 
    //Close the scheduler before calling vos_close to make sure no thread is 
    // scheduled after the each module close is called i.e after all the data 
@@ -3790,13 +3774,6 @@ int hdd_wlan_startup(struct device *dev )
       goto err_unregister_pmops;
    }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-   // Register suspend/resume callbacks
-   if(pHddCtx->cfg_ini->nEnableSuspend)
-   {
-      register_wlan_suspend();
-   }
-#endif
 
    // register net device notifier for device change notification
    ret = register_netdevice_notifier(&hdd_netdev_notifier);
@@ -3837,9 +3814,6 @@ int hdd_wlan_startup(struct device *dev )
       goto err_nl_srv;
    }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-   hdd_register_mcast_bcast_filter(pHddCtx);
-#endif
 #ifdef CONFIG_CFG80211
 #ifdef WLAN_SOFTAP_FEATURE
    if (VOS_STA_SAP_MODE != hdd_get_conparam())

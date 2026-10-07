@@ -24,9 +24,6 @@
 #include <linux/pm.h>
 #include <linux/slab.h>
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)
-#include <linux/earlysuspend.h>
-#endif
 
 /* marimba configuration block: TS_CTL0 */
 #define TS_CTL0			0xFF
@@ -79,9 +76,6 @@ struct marimba_tsadc {
 	struct clk	*codec_ssbi;
 	struct device *child_tssc;
 	bool clk_enabled;
-#if defined(CONFIG_HAS_EARLYSUSPEND)
-	struct early_suspend		early_suspend;
-#endif
 };
 
 static struct marimba_tsadc *tsadc_dev;
@@ -522,30 +516,11 @@ fail_tsadc_power:
 }
 
 static struct dev_pm_ops tsadc_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend = marimba_tsadc_suspend,
 	.resume = marimba_tsadc_resume,
-#endif
 };
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void marimba_tsadc_early_suspend(struct early_suspend *h)
-{
-	struct marimba_tsadc *tsadc = container_of(h, struct marimba_tsadc,
-						 early_suspend);
-
-	marimba_tsadc_suspend(tsadc->dev);
-}
-
-static void marimba_tsadc_late_resume(struct early_suspend *h)
-{
-	struct marimba_tsadc *tsadc = container_of(h, struct marimba_tsadc,
-						 early_suspend);
-
-	marimba_tsadc_resume(tsadc->dev);
-}
-#endif
 
 static int __devinit marimba_tsadc_probe(struct platform_device *pdev)
 {
@@ -609,13 +584,6 @@ static int __devinit marimba_tsadc_probe(struct platform_device *pdev)
 	tsadc->child_tssc = child;
 	platform_set_drvdata(pdev, tsadc);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	tsadc->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN +
-						 TSADC_SUSPEND_LEVEL;
-	tsadc->early_suspend.suspend = marimba_tsadc_early_suspend;
-	tsadc->early_suspend.resume = marimba_tsadc_late_resume;
-	register_early_suspend(&tsadc->early_suspend);
-#endif
 
 	tsadc_dev = tsadc;
 	device_init_wakeup(&pdev->dev, pdata->can_wakeup);
@@ -657,9 +625,6 @@ static int __devexit marimba_tsadc_remove(struct platform_device *pdev)
 	if (tsadc->pdata->marimba_tsadc_power)
 		rc = tsadc->pdata->marimba_tsadc_power(0);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&tsadc->early_suspend);
-#endif
 
 	platform_set_drvdata(pdev, NULL);
 	kfree(tsadc);

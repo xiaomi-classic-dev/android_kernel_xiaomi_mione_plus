@@ -584,9 +584,9 @@ config LEDS_TRIGGER_DEFAULT_ON
 
 config LEDS_TRIGGER_SLEEP
 	tristate "LED Sleep Mode Trigger"
-	depends on LEDS_TRIGGERS && HAS_EARLYSUSPEND
+	depends on LEDS_TRIGGERS && PM_SLEEP
 	help
-	  This turns LEDs on when the screen is off but the cpu still running.
+	  This turns LEDs off before system sleep and back on after resume.
 
 comment "iptables trigger is under Netfilter config (LED target)"
 	depends on LEDS_TRIGGERS

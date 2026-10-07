@@ -21,9 +21,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
-#ifdef CONFIG_SENSORS_LSM303D_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif
 #include <linux/input/lsm303d.h>
 
 /* lsm303d register list */
@@ -211,9 +208,6 @@ struct lsm303d_data {
 	struct mutex mutex;
 	struct i2c_client *client;
 	bool suspended;
-#ifdef CONFIG_SENSORS_LSM303D_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif
 	/* state for magnetometer */
 	struct input_dev *mag_input;
 	bool mag_opened;
@@ -1576,7 +1570,7 @@ static irqreturn_t lsm303d_interrupt(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-#if defined(CONFIG_PM) || defined(CONFIG_SENSORS_LSM303D_EARLYSUSPEND)
+#if defined(CONFIG_PM) || 0
 static int lsm303d_suspend(struct device *dev)
 {
 	int error = 0;
@@ -1616,30 +1610,11 @@ static int lsm303d_resume(struct device *dev)
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops lsm303d_pm_ops = {
-#ifndef CONFIG_SENSORS_LSM303D_EARLYSUSPEND
 	.suspend = lsm303d_suspend,
 	.resume = lsm303d_resume,
-#endif
 };
 #endif
 
-#ifdef CONFIG_SENSORS_LSM303D_EARLYSUSPEND
-static void lsm303d_early_suspend(struct early_suspend *h)
-{
-	struct lsm303d_data *data = container_of(h,
-						 struct lsm303d_data,
-						 early_suspend);
-	lsm303d_suspend(&data->client->dev);
-}
-
-static void lsm303d_early_resume(struct early_suspend *h)
-{
-	struct lsm303d_data *data = container_of(h,
-						 struct lsm303d_data,
-						 early_suspend);
-	lsm303d_resume(&data->client->dev);
-}
-#endif
 
 static int
 lsm303d_probe(struct i2c_client *client, const struct i2c_device_id *id)
@@ -1706,12 +1681,6 @@ lsm303d_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		dev_err(&client->dev, "fail to request interrupt.");
 		goto exit_acc_teardown;
 	}
-#ifdef CONFIG_SENSORS_LSM303D_EARLYSUSPEND
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	data->early_suspend.suspend = lsm303d_early_suspend;
-	data->early_suspend.resume = lsm303d_early_resume;
-	register_early_suspend(&data->early_suspend);
-#endif
 
 	goto exit;		/* all is fine */
 
@@ -1730,9 +1699,6 @@ static int lsm303d_remove(struct i2c_client *client)
 	struct lsm303d_data *data;
 	data = i2c_get_clientdata(client);
 
-#ifdef CONFIG_SENSORS_LSM303D_EARLYSUSPEND
-	unregister_early_suspend(&data->early_suspend);
-#endif
 
 	free_irq(client->irq, data);
 

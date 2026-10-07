@@ -696,13 +696,6 @@ config SENSORS_LIS3DH_MIONE
 	help
 	  Driver for STMicro LIS3DH accelerometer - digital motion sensor.
 
-config SENSORS_LIS3DH_MIONE_EARLYSUSPEND
-	bool "LIS3DH early suspend support"
-	depends on SENSORS_LIS3DH
-	select HAS_EARLYSUSPEND
-	default n
-	help
-	  Enable LIS3DH early suspend feature
 
 config SENSORS_LSM303D
 	tristate "LSM303D combo sensor support"
@@ -711,13 +704,6 @@ config SENSORS_LSM303D
 	help
 	  Driver for STMicro LSM303D accelerometer and magnetometer.
 
-config SENSORS_LSM303D_EARLYSUSPEND
-	bool "LSM303D early suspend support"
-	depends on SENSORS_LSM303D
-	select HAS_EARLYSUSPEND
-	default n
-	help
-	  Enable LSM303D early suspend feature
 
 config SENSORS_BMC055
 	tristate "BMC055 eCompass Sensor Driver"

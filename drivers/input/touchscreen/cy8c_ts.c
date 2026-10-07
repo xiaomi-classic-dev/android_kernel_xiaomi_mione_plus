@@ -47,12 +47,6 @@
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)
-#include <linux/earlysuspend.h>
-
-/* Early-suspend level */
-#define CY8C_TS_SUSPEND_LEVEL 1
-#endif
 
 #define CY8CTMA300	0x0
 #define CY8CTMG200	0x1
@@ -129,9 +123,6 @@ struct cy8c_ts {
 	bool int_pending;
 	struct mutex sus_lock;
 	u32 pen_irq;
-#if defined(CONFIG_HAS_EARLYSUSPEND)
-	struct early_suspend		early_suspend;
-#endif
 };
 
 static inline u16 join_bytes(u8 a, u8 b)
@@ -548,27 +539,10 @@ err_power_off:
 	return rc;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void cy8c_ts_early_suspend(struct early_suspend *h)
-{
-	struct cy8c_ts *ts = container_of(h, struct cy8c_ts, early_suspend);
-
-	cy8c_ts_suspend(&ts->client->dev);
-}
-
-static void cy8c_ts_late_resume(struct early_suspend *h)
-{
-	struct cy8c_ts *ts = container_of(h, struct cy8c_ts, early_suspend);
-
-	cy8c_ts_resume(&ts->client->dev);
-}
-#endif
 
 static struct dev_pm_ops cy8c_ts_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend	= cy8c_ts_suspend,
 	.resume		= cy8c_ts_resume,
-#endif
 };
 #endif
 
@@ -708,13 +682,6 @@ config_irq_gpio:
 
 	device_init_wakeup(&client->dev, ts->pdata->wakeup);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN +
-						CY8C_TS_SUSPEND_LEVEL;
-	ts->early_suspend.suspend = cy8c_ts_early_suspend;
-	ts->early_suspend.resume = cy8c_ts_late_resume;
-	register_early_suspend(&ts->early_suspend);
-#endif
 
 	return 0;
 error_req_irq_fail:
@@ -747,9 +714,6 @@ static int __devexit cy8c_ts_remove(struct i2c_client *client)
 {
 	struct cy8c_ts *ts = i2c_get_clientdata(client);
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)
-	unregister_early_suspend(&ts->early_suspend);
-#endif
 	pm_runtime_set_suspended(&client->dev);
 	pm_runtime_disable(&client->dev);
 

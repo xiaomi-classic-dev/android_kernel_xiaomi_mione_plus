@@ -18,7 +18,6 @@
 #define DEBUG  0
 
 #include <linux/slab.h>
-#include <linux/earlysuspend.h>
 #include <linux/err.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -245,8 +244,6 @@ struct msm_battery_info {
 	wait_queue_head_t wait_q;
 
 	u32 vbatt_modify_reply_avail;
-
-	struct early_suspend early_suspend;
 };
 
 static struct msm_battery_info msm_batt_info = {
@@ -652,158 +649,6 @@ static void msm_batt_update_psy_status(void)
 	}
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-struct batt_modify_client_req {
-
-	u32 client_handle;
-
-	/* The voltage at which callback (CB) should be called. */
-	u32 desired_batt_voltage;
-
-	/* The direction when the CB should be called. */
-	u32 voltage_direction;
-
-	/* The registered callback to be called when voltage and
-	 * direction specs are met. */
-	u32 batt_cb_id;
-
-	/* The call back data */
-	u32 cb_data;
-};
-
-struct batt_modify_client_rep {
-	u32 result;
-};
-
-static int msm_batt_modify_client_arg_func(struct msm_rpc_client *batt_client,
-				       void *buf, void *data)
-{
-	struct batt_modify_client_req *batt_modify_client_req =
-		(struct batt_modify_client_req *)data;
-	u32 *req = (u32 *)buf;
-	int size = 0;
-
-	*req = cpu_to_be32(batt_modify_client_req->client_handle);
-	size += sizeof(u32);
-	req++;
-
-	*req = cpu_to_be32(batt_modify_client_req->desired_batt_voltage);
-	size += sizeof(u32);
-	req++;
-
-	*req = cpu_to_be32(batt_modify_client_req->voltage_direction);
-	size += sizeof(u32);
-	req++;
-
-	*req = cpu_to_be32(batt_modify_client_req->batt_cb_id);
-	size += sizeof(u32);
-	req++;
-
-	*req = cpu_to_be32(batt_modify_client_req->cb_data);
-	size += sizeof(u32);
-
-	return size;
-}
-
-static int msm_batt_modify_client_ret_func(struct msm_rpc_client *batt_client,
-				       void *buf, void *data)
-{
-	struct  batt_modify_client_rep *data_ptr, *buf_ptr;
-
-	data_ptr = (struct batt_modify_client_rep *)data;
-	buf_ptr = (struct batt_modify_client_rep *)buf;
-
-	data_ptr->result = be32_to_cpu(buf_ptr->result);
-
-	return 0;
-}
-
-static int msm_batt_modify_client(u32 client_handle, u32 desired_batt_voltage,
-	     u32 voltage_direction, u32 batt_cb_id, u32 cb_data)
-{
-	int rc;
-
-	struct batt_modify_client_req  req;
-	struct batt_modify_client_rep rep;
-
-	req.client_handle = client_handle;
-	req.desired_batt_voltage = desired_batt_voltage;
-	req.voltage_direction = voltage_direction;
-	req.batt_cb_id = batt_cb_id;
-	req.cb_data = cb_data;
-
-	rc = msm_rpc_client_req(msm_batt_info.batt_client,
-			BATTERY_MODIFY_CLIENT_PROC,
-			msm_batt_modify_client_arg_func, &req,
-			msm_batt_modify_client_ret_func, &rep,
-			msecs_to_jiffies(BATT_RPC_TIMEOUT));
-
-	if (rc < 0) {
-		pr_err("%s: ERROR. failed to modify  Vbatt client\n",
-		       __func__);
-		return rc;
-	}
-
-	if (rep.result != BATTERY_MODIFICATION_SUCCESSFUL) {
-		pr_err("%s: ERROR. modify client failed. result = %u\n",
-		       __func__, rep.result);
-		return -EIO;
-	}
-
-	return 0;
-}
-
-void msm_batt_early_suspend(struct early_suspend *h)
-{
-	int rc;
-
-	pr_debug("%s: enter\n", __func__);
-
-	if (msm_batt_info.batt_handle != INVALID_BATT_HANDLE) {
-		rc = msm_batt_modify_client(msm_batt_info.batt_handle,
-				msm_batt_info.voltage_fail_safe,
-				BATTERY_VOLTAGE_BELOW_THIS_LEVEL,
-				BATTERY_CB_ID_LOW_VOL,
-				msm_batt_info.voltage_fail_safe);
-
-		if (rc < 0) {
-			pr_err("%s: msm_batt_modify_client. rc=%d\n",
-			       __func__, rc);
-			return;
-		}
-	} else {
-		pr_err("%s: ERROR. invalid batt_handle\n", __func__);
-		return;
-	}
-
-	pr_debug("%s: exit\n", __func__);
-}
-
-void msm_batt_late_resume(struct early_suspend *h)
-{
-	int rc;
-
-	pr_debug("%s: enter\n", __func__);
-
-	if (msm_batt_info.batt_handle != INVALID_BATT_HANDLE) {
-		rc = msm_batt_modify_client(msm_batt_info.batt_handle,
-				msm_batt_info.voltage_fail_safe,
-				BATTERY_ALL_ACTIVITY,
-				BATTERY_CB_ID_ALL_ACTIV, BATTERY_ALL_ACTIVITY);
-		if (rc < 0) {
-			pr_err("%s: msm_batt_modify_client FAIL rc=%d\n",
-			       __func__, rc);
-			return;
-		}
-	} else {
-		pr_err("%s: ERROR. invalid batt_handle\n", __func__);
-		return;
-	}
-
-	msm_batt_update_psy_status();
-	pr_debug("%s: exit\n", __func__);
-}
-#endif
 
 struct msm_batt_vbatt_filter_req {
 	u32 batt_handle;
@@ -1169,10 +1014,6 @@ static int msm_batt_cleanup(void)
 		}
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	if (msm_batt_info.early_suspend.suspend == msm_batt_early_suspend)
-		unregister_early_suspend(&msm_batt_info.early_suspend);
-#endif
 #endif
 	return rc;
 }
@@ -1424,12 +1265,6 @@ static int __devinit msm_batt_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	msm_batt_info.early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN;
-	msm_batt_info.early_suspend.suspend = msm_batt_early_suspend;
-	msm_batt_info.early_suspend.resume = msm_batt_late_resume;
-	register_early_suspend(&msm_batt_info.early_suspend);
-#endif
 	msm_batt_update_psy_status();
 
 #else

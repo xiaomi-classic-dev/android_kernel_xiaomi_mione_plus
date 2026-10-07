@@ -1057,7 +1057,6 @@ wl_iw_set_suspend_mode(struct net_device *dev,
 {
 	int ret = 0;
 
-#if !defined(CONFIG_HAS_EARLYSUSPEND) || !defined(DHD_USE_EARLYSUSPEND)
 	int suspend_flag;
 
 	suspend_flag = *(extra + strlen(SETSUSPENDMODE_CMD) + 1) - '0';
@@ -1069,7 +1068,6 @@ wl_iw_set_suspend_mode(struct net_device *dev,
 		WL_ERROR(("%s: Suspend Mode %d\n", __FUNCTION__, suspend_flag));
 	else
 		WL_ERROR(("%s: failed %d\n", __FUNCTION__, ret));
-#endif
 	return ret;
 }
 

@@ -1489,78 +1489,6 @@ exit_err_clean:
 	return err;
 }
 
-#ifdef CONFIG_BMM050_HAS_EARLYSUSPEND
-static int bmm_pre_suspend(struct bmm050_data *client_data)
-{
-	int err = 0;
-	struct bmc055_data *bmc055_data = container_of(client_data,
-						       struct bmc055_data, mag);
-	PDEBUG("function entrance");
-
-	mutex_lock(&bmc055_data->bmc055_mutex);
-	if (client_data->enable) {
-		cancel_delayed_work(&client_data->work);
-		PDEBUG("cancel work");
-	}
-	mutex_unlock(&bmc055_data->bmc055_mutex);
-
-	return err;
-}
-
-static int bmm_post_resume(struct bmm050_data *client_data)
-{
-	int err = 0;
-	struct bmc055_data *bmc055_data = container_of(client_data,
-						       struct bmc055_data, mag);
-	unsigned long delay_ms = atomic_read(&client_data->delay) / 1000000;
-
-	mutex_lock(&bmc055_data->bmc055_mutex);
-	if (client_data->enable) {
-		schedule_delayed_work(&client_data->work,
-				      msecs_to_jiffies(delay_ms));
-	}
-	mutex_unlock(&bmc055_data->bmc055_mutex);
-
-	return err;
-}
-
-void bmm_display_suspend(struct bmm050_data *client_data)
-{
-	int err = 0;
-	u8 power_mode;
-	struct bmc055_data *bmc055_data = container_of(client_data,
-						       struct bmc055_data, mag);
-
-	PDEBUG("function entrance");
-
-	mutex_lock(&bmc055_data->bmc055_mutex);
-	bmm050_get_powermode(bmc055_data->bmc055_client, &power_mode);
-	if (power_mode) {
-		err = bmm_pre_suspend(client_data);
-		err = bmm050_set_functional_state(bmc055_data->bmc055_client,
-						  BMM050_SUSPEND_MODE);
-	}
-	mutex_unlock(&bmc055_data->bmc055_mutex);
-
-}
-
-void bmm_display_resume(struct bmm050_data *client_data)
-{
-	int err = 0;
-	struct bmc055_data *bmc055_data = container_of(client_data,
-						       struct bmc055_data, mag);
-
-	PDEBUG("function entrance");
-
-	mutex_lock(&bmc055_data->bmc055_mutex);
-
-	/* err = bmm_restore_hw_cfg(bmc055_client, client_data); */
-	/* post resume operation */
-	bmm_post_resume(client_data);
-
-	mutex_unlock(&bmc055_data->bmc055_mutex);
-}
-#else
 void bmm_display_suspend(struct bmm050_data *client_data)
 {
 
@@ -1570,7 +1498,6 @@ void bmm_display_resume(struct bmm050_data *client_data)
 {
 
 }
-#endif
 
 int bmm_remove(struct bmm050_data *client_data)
 {

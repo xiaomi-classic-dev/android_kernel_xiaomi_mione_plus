@@ -15,7 +15,6 @@
 
 #include <linux/cy8c_tmg_ts.h>
 #include <linux/delay.h>
-#include <linux/earlysuspend.h>
 #include <linux/hrtimer.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
@@ -35,15 +34,10 @@ struct cy8c_ts_data {
 	struct work_struct work;
 	uint16_t version;
 	int (*power) (int on);
-	struct early_suspend early_suspend;
 };
 
 struct workqueue_struct *cypress_touch_wq;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void cy8c_ts_early_suspend(struct early_suspend *h);
-static void cy8c_ts_late_resume(struct early_suspend *h);
-#endif
 
 uint16_t sample_count, X_mean, Y_mean, first_touch;
 
@@ -319,12 +313,6 @@ static int cy8c_ts_probe(struct i2c_client *client,
 		hrtimer_start(&ts->timer, ktime_set(1, 0), HRTIMER_MODE_REL);
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	ts->early_suspend.suspend = cy8c_ts_early_suspend;
-	ts->early_suspend.resume = cy8c_ts_late_resume;
-	register_early_suspend(&ts->early_suspend);
-#endif
 
 	dev_info(&client->dev, "Start touchscreen %s in %s mode\n",
 		 ts->input_dev->name, (ts->use_irq ? "interrupt" : "polling"));
@@ -350,8 +338,6 @@ err_check_functionality_failed:
 static int cy8c_ts_remove(struct i2c_client *client)
 {
 	struct cy8c_ts_data *ts = i2c_get_clientdata(client);
-
-	unregister_early_suspend(&ts->early_suspend);
 
 	if (ts->use_irq)
 		free_irq(client->irq, ts);
@@ -407,21 +393,6 @@ static int cy8c_ts_resume(struct i2c_client *client)
 	return 0;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void cy8c_ts_early_suspend(struct early_suspend *h)
-{
-	struct cy8c_ts_data *ts;
-	ts = container_of(h, struct cy8c_ts_data, early_suspend);
-	cy8c_ts_suspend(ts->client, PMSG_SUSPEND);
-}
-
-static void cy8c_ts_late_resume(struct early_suspend *h)
-{
-	struct cy8c_ts_data *ts;
-	ts = container_of(h, struct cy8c_ts_data, early_suspend);
-	cy8c_ts_resume(ts->client);
-}
-#endif
 
 static const struct i2c_device_id cy8c_ts_i2c_id[] = {
 	{CYPRESS_TMG_NAME, 0},
@@ -432,10 +403,8 @@ static struct i2c_driver cy8c_ts_driver = {
 	.id_table = cy8c_ts_i2c_id,
 	.probe = cy8c_ts_probe,
 	.remove = cy8c_ts_remove,
-#ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend = cy8c_ts_suspend,
 	.resume = cy8c_ts_resume,
-#endif
 	.driver = {
 		.name = CYPRESS_TMG_NAME,
 		.owner = THIS_MODULE,

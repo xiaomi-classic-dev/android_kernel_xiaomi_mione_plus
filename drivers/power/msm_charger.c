@@ -24,9 +24,6 @@
 #include <linux/time.h>
 #include <linux/slab.h>
 #include <linux/wakelock.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif
 #include <asm/atomic.h>
 
 #include <mach/msm_hsusb.h>
@@ -115,9 +112,6 @@ struct msm_charger_mux {
 	struct work_struct queue_work;
 	struct workqueue_struct *event_wq_thread;
 	struct wake_lock wl;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif				/* CONFIG_HAS_EARLYSUSPEND */
 };
 
 static struct msm_charger_mux msm_chg;
@@ -1143,9 +1137,6 @@ static int determine_initial_batt_status(void)
 	return 0;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void msm_chg_late_resume(struct early_suspend *handler);
-#endif
 static int __devinit msm_charger_probe(struct platform_device *pdev)
 {
 	msm_chg.dev = &pdev->dev;
@@ -1194,11 +1185,6 @@ static int __devinit msm_charger_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&msm_chg.update_heartbeat_work, update_heartbeat);
 
 	wake_lock_init(&msm_chg.wl, WAKE_LOCK_SUSPEND, "msm_charger");
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	msm_chg.early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 2;
-	msm_chg.early_suspend.resume = msm_chg_late_resume;
-	register_early_suspend(&msm_chg.early_suspend);
-#endif
 	return 0;
 }
 
@@ -1355,13 +1341,6 @@ int msm_charger_update_heartbeat(void)
 
 EXPORT_SYMBOL(msm_charger_update_heartbeat);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void msm_chg_late_resume(struct early_suspend *handler)
-{
-	dev_dbg(msm_chg.dev, "%s\n", __func__);
-	msm_charger_update_heartbeat();
-}
-#endif
 
 static SIMPLE_DEV_PM_OPS(msm_charger_pm_ops,
 		msm_charger_suspend, msm_charger_resume);

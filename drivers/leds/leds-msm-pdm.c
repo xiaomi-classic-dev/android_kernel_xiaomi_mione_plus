@@ -23,12 +23,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/module.h>
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-
-/* Early-suspend level */
-#define LED_SUSPEND_LEVEL 1
-#endif
 
 #define PDM_DUTY_MAXVAL BIT(16)
 #define PDM_DUTY_REFVAL BIT(15)
@@ -37,9 +31,6 @@ struct pdm_led_data {
 	struct led_classdev cdev;
 	void __iomem *perph_base;
 	int pdm_offset;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif
 };
 
 static void msm_led_brightness_set_percent(struct pdm_led_data *led,
@@ -74,21 +65,9 @@ static int msm_led_pdm_suspend(struct device *dev)
 	return 0;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void msm_led_pdm_early_suspend(struct early_suspend *h)
-{
-	struct pdm_led_data *led = container_of(h,
-			struct pdm_led_data, early_suspend);
-
-	msm_led_pdm_suspend(led->cdev.dev->parent);
-}
-
-#endif
 
 static const struct dev_pm_ops msm_led_pdm_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend	= msm_led_pdm_suspend,
-#endif
 };
 #endif
 
@@ -164,12 +143,6 @@ static int __devinit msm_pdm_led_probe(struct platform_device *pdev)
 		goto err_led_reg;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	led->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN +
-						LED_SUSPEND_LEVEL;
-	led->early_suspend.suspend = msm_led_pdm_early_suspend;
-	register_early_suspend(&led->early_suspend);
-#endif
 
 	platform_set_drvdata(pdev, led);
 	return 0;
@@ -190,9 +163,6 @@ static int __devexit msm_pdm_led_remove(struct platform_device *pdev)
 	struct pdm_led_data *led = platform_get_drvdata(pdev);
 	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&led->early_suspend);
-#endif
 	pm_runtime_set_suspended(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 

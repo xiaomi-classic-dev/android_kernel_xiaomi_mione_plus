@@ -16,8 +16,6 @@
  * GNU General Public License for more details.
  *
  */
-
-#include <linux/earlysuspend.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/cpufreq.h>

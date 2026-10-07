@@ -34,9 +34,6 @@
 #include <linux/debugfs.h>
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif
 
 
 /* Permissions for sysfs attributes.  Since the permissions policy will change
@@ -359,8 +356,6 @@ struct rmi_phys_device {
  * @number: Unique number for the device on the bus.
  * @driver: Pointer to associated driver
  * @phys: Pointer to the physical interface
- * @early_suspend_handler: Pointers to early_suspend and late_resume, if
- * configured.
  *
  * This structs represent an RMI device.
  *
@@ -372,9 +367,6 @@ struct rmi_device {
 	struct rmi_driver *driver;
 	struct rmi_phys_device *phys;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend_handler;
-#endif
 #ifdef CONFIG_RMI4_DEBUG
 	struct dentry *debugfs_root;
 #endif

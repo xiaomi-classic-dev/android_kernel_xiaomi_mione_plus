@@ -32,8 +32,6 @@
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
 #include <linux/akm8975.h>
-#include <linux/earlysuspend.h>
-
 #define AK8975DRV_CALL_DBG 0
 #if AK8975DRV_CALL_DBG
 #define FUNCDBG(msg)	pr_err("%s:%s\n", __func__, msg);
@@ -50,9 +48,6 @@ struct akm8975_data {
 	struct input_dev *input_dev;
 	struct work_struct work;
 	struct mutex flags_lock;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif
 };
 
 /*
@@ -479,29 +474,6 @@ static int akm8975_resume(struct i2c_client *client)
 	return akm8975_power_on(akm);
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void akm8975_early_suspend(struct early_suspend *handler)
-{
-	struct akm8975_data *akm;
-	akm = container_of(handler, struct akm8975_data, early_suspend);
-
-#if AK8975DRV_CALL_DBG
-	pr_info("%s\n", __func__);
-#endif
-	akm8975_suspend(akm->this_client, PMSG_SUSPEND);
-}
-
-static void akm8975_early_resume(struct early_suspend *handler)
-{
-	struct akm8975_data *akm;
-	akm = container_of(handler, struct akm8975_data, early_suspend);
-
-#if AK8975DRV_CALL_DBG
-	pr_info("%s\n", __func__);
-#endif
-	akm8975_resume(akm->this_client);
-}
-#endif
 
 
 static int akm8975_init_client(struct i2c_client *client)
@@ -658,11 +630,6 @@ int akm8975_probe(struct i2c_client *client,
 
 	err = device_create_file(&client->dev, &dev_attr_akm_ms1);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	akm->early_suspend.suspend = akm8975_early_suspend;
-	akm->early_suspend.resume = akm8975_early_resume;
-	register_early_suspend(&akm->early_suspend);
-#endif
 	return 0;
 
 exit_misc_device_register_failed:
@@ -701,10 +668,8 @@ MODULE_DEVICE_TABLE(i2c, akm8975_id);
 static struct i2c_driver akm8975_driver = {
 	.probe = akm8975_probe,
 	.remove = akm8975_remove,
-#ifndef CONFIG_HAS_EARLYSUSPEND
 	.resume = akm8975_resume,
 	.suspend = akm8975_suspend,
-#endif
 	.id_table = akm8975_id,
 	.driver = {
 		.name = "akm8975",
