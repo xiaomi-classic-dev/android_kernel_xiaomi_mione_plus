@@ -26,8 +26,8 @@
 #include <linux/input/isl29028.h>
 #include <linux/wakelock.h>
 #include <linux/workqueue.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/fb.h>
 #endif
 
 /* isl29028 register list */
@@ -106,11 +106,11 @@ struct isl29028_data {
 	struct wake_lock	wake_lock;
 	struct delayed_work	delayed_work;
 	struct i2c_client	*client;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend	early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
 #endif
 	bool			suspended;
-	bool			early_suspended;
+	bool			screen_off;
 	unsigned long		dump_period;
 	bool			dump_output;
 	bool			dump_register;
@@ -369,7 +369,7 @@ static bool prox_active(struct isl29028_data *data)
 static bool als_active(struct isl29028_data *data)
 {
 	return data->als_opened && data->als_enabled &&
-		!data->suspended && !data->early_suspended &&
+		!data->suspended && !data->screen_off &&
 		(!prox_active(data) || !data->als_temp_disable);
 }
 
@@ -1236,27 +1236,33 @@ static const struct dev_pm_ops isl29028_pm_ops = {
 };
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void isl29028_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static int isl29028_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
 {
-	struct isl29028_data *data = container_of(h,
-			struct isl29028_data, early_suspend);
+	struct fb_event *ev = arg;
+	struct isl29028_data *data = container_of(nb,
+		struct isl29028_data, fb_notifier);
+	int blank, ret;
+	bool screen_off;
 
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	screen_off = blank == FB_BLANK_POWERDOWN;
 	mutex_lock(&data->mutex);
-	data->early_suspended = true;
-	update_device(data);
+	if (data->screen_off != screen_off) {
+		data->screen_off = screen_off;
+		ret = update_device(data);
+		if (ret)
+			dev_warn(&data->client->dev,
+				"display power update failed: %d\n", ret);
+	}
 	mutex_unlock(&data->mutex);
-}
-
-static void isl29028_early_resume(struct early_suspend *h)
-{
-	struct isl29028_data *data = container_of(h,
-			struct isl29028_data, early_suspend);
-
-	mutex_lock(&data->mutex);
-	data->early_suspended = false;
-	update_device(data);
-	mutex_unlock(&data->mutex);
+	return NOTIFY_OK;
 }
 #endif
 
@@ -1336,14 +1342,16 @@ static int isl29028_probe(struct i2c_client *client,
 		goto exit_teardown_prox_input;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	data->early_suspend.suspend = isl29028_early_suspend;
-	data->early_suspend.resume = isl29028_early_resume;
-	register_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	data->fb_notifier.notifier_call = isl29028_fb_event;
+	error = fb_register_client(&data->fb_notifier);
+	if (error)
+		goto exit_free_irq;
 #endif
 	goto exit; /* all is fine */
 
+exit_free_irq:
+	free_irq(client->irq, data);
 exit_teardown_prox_input:
 	teardown_prox_input(data, true);
 exit_teardown_als_input:
@@ -1362,8 +1370,8 @@ static int isl29028_remove(struct i2c_client *client)
 	struct isl29028_data *data;
 	data = i2c_get_clientdata(client);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&data->fb_notifier);
 #endif
 	free_irq(client->irq, data);
 

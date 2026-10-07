@@ -74,7 +74,7 @@ static const struct ft5x0x_bus_ops ft5x0x_i2c_bops = {
 	.write   = ft5x0x_i2c_write,
 };
 
-#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) && !defined(CONFIG_FB)
 static int ft5x0x_i2c_suspend(struct device *dev)
 {
 	return ft5x0x_suspend(dev_get_drvdata(dev));
@@ -129,7 +129,7 @@ static struct i2c_driver ft5x0x_i2c_driver = {
 	.driver = {
 		.name  = "ft5x0x_i2c",
 		.owner = THIS_MODULE,
-#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) && !defined(CONFIG_FB)
 		.pm    = &ft5x0x_i2c_pm_ops,
 #endif
 	},

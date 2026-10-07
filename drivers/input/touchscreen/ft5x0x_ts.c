@@ -13,8 +13,8 @@
  */
 
 #include <linux/delay.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/fb.h>
 #endif
 #include <linux/firmware.h>
 #include <linux/gpio.h>
@@ -107,8 +107,9 @@ struct ft5x0x_data {
 	struct kobject *vkeys_dir;
 	struct kobj_attribute vkeys_attr;
 	const struct ft5x0x_bus_ops *bops;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+	bool fb_suspended;
 #endif
 	struct ft5x0x_tracker tracker[FT5X0X_MAX_FINGER];
 	int  irq;
@@ -567,19 +568,32 @@ int ft5x0x_resume(struct ft5x0x_data *ft5x0x)
 }
 EXPORT_SYMBOL_GPL(ft5x0x_resume);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void ft5x0x_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static int ft5x0x_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
 {
-	struct ft5x0x_data *ft5x0x = container_of(h,
-					struct ft5x0x_data, early_suspend);
-	ft5x0x_suspend(ft5x0x);
-}
+	struct fb_event *ev = arg;
+	struct ft5x0x_data *ft5x0x = container_of(nb,
+		struct ft5x0x_data, fb_notifier);
+	bool suspend;
+	int blank, ret;
 
-static void ft5x0x_early_resume(struct early_suspend *h)
-{
-	struct ft5x0x_data *ft5x0x = container_of(h,
-					struct ft5x0x_data, early_suspend);
-	ft5x0x_resume(ft5x0x);
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	suspend = blank == FB_BLANK_POWERDOWN;
+	if (ft5x0x->fb_suspended == suspend)
+		return NOTIFY_OK;
+	ret = suspend ? ft5x0x_suspend(ft5x0x) :
+		ft5x0x_resume(ft5x0x);
+	if (ret)
+		dev_warn(ft5x0x->dev, "display power update failed: %d\n", ret);
+	else
+		ft5x0x->fb_suspended = suspend;
+	return NOTIFY_OK;
 }
 #endif
 
@@ -915,14 +929,16 @@ struct ft5x0x_data *ft5x0x_probe(struct device *dev, int irq,
 		goto err_put_vkeys;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	ft5x0x->early_suspend.level   = EARLY_SUSPEND_LEVEL_BLANK_SCREEN+1;
-	ft5x0x->early_suspend.suspend = ft5x0x_early_suspend;
-	ft5x0x->early_suspend.resume  = ft5x0x_early_resume;
-	register_early_suspend(&ft5x0x->early_suspend);
+#ifdef CONFIG_FB
+	ft5x0x->fb_notifier.notifier_call = ft5x0x_fb_event;
+	error = fb_register_client(&ft5x0x->fb_notifier);
+	if (error)
+		goto err_remove_sysfs;
 #endif
 	return ft5x0x;
 
+err_remove_sysfs:
+	sysfs_remove_group(&dev->kobj, &ft5x0x_attr_group);
 err_put_vkeys:
 	kobject_put(ft5x0x->vkeys_dir);
 err_free_irq:
@@ -950,8 +966,8 @@ void ft5x0x_remove(struct ft5x0x_data *ft5x0x)
 {
 	struct ft5x0x_platform_data *pdata = ft5x0x->dev->platform_data;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&ft5x0x->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&ft5x0x->fb_notifier);
 #endif
 	sysfs_remove_group(&ft5x0x->dev->kobj, &ft5x0x_attr_group);
 	kobject_put(ft5x0x->vkeys_dir);

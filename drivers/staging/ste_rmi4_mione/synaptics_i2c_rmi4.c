@@ -33,8 +33,8 @@
 #include <linux/interrupt.h>
 #include <linux/regulator/consumer.h>
 #include <linux/module.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/fb.h>
 #endif
 #include "synaptics_i2c_rmi4.h"
 
@@ -210,8 +210,9 @@ struct synaptics_rmi4_data {
 	bool			dbgdump;
 	struct kobject		*vkeys_dir;
 	struct kobj_attribute	vkeys_attr;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend	early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+	bool display_suspended;
 #endif
 };
 
@@ -1380,8 +1381,10 @@ static int synaptics_rmi4_flash_firmware(struct synaptics_rmi4_data *pdata,
  * the rmi4 Physical Device Table and enumerate any rmi4 functions that
  * have data sources associated with them.
  */
-static void synaptics_rmi4_early_suspend(struct early_suspend *h);
-static void synaptics_rmi4_early_resume(struct early_suspend *h);
+#ifdef CONFIG_FB
+static int synaptics_rmi4_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg);
+#endif
 
 static int __devinit synaptics_rmi4_probe
 	(struct i2c_client *client, const struct i2c_device_id *dev_id)
@@ -1585,11 +1588,15 @@ static int __devinit synaptics_rmi4_probe
 		goto err_free_irq;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	rmi4_data->early_suspend.level   = EARLY_SUSPEND_LEVEL_BLANK_SCREEN+1;
-	rmi4_data->early_suspend.suspend = synaptics_rmi4_early_suspend;
-	rmi4_data->early_suspend.resume  = synaptics_rmi4_early_resume;
-	register_early_suspend(&rmi4_data->early_suspend);
+#ifdef CONFIG_FB
+	rmi4_data->fb_notifier.notifier_call = synaptics_rmi4_fb_event;
+	retval = fb_register_client(&rmi4_data->fb_notifier);
+	if (retval) {
+		free_irq(platformdata->irq_number, rmi4_data);
+		input_unregister_device(rmi4_data->input_dev);
+		rmi4_data->input_dev = NULL;
+		goto err_remove_group;
+	}
 #endif
 
 	return retval;
@@ -1632,8 +1639,8 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 	struct synaptics_rmi4_data *rmi4_data = i2c_get_clientdata(client);
 	struct synaptics_rmi4_platform_data *pdata = rmi4_data->board;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&rmi4_data->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&rmi4_data->fb_notifier);
 #endif
 	wake_up(&rmi4_data->wait);
 	free_irq(pdata->irq_number, rmi4_data);
@@ -1653,7 +1660,7 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 	return 0;
 }
 
-#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) || defined(CONFIG_FB)
 /**
  * synaptics_rmi4_suspend() - suspend the touch screen controller
  * @dev: pointer to device structure
@@ -1704,40 +1711,59 @@ static int synaptics_rmi4_resume(struct device *dev)
 	if (pdata->regulator_en)
 		regulator_enable(rmi4_data->regulator);
 
-	enable_irq(pdata->irq_number);
-
 	retval = synaptics_rmi4_i2c_byte_write(rmi4_data,
 					rmi4_data->fn01_ctrl_base_addr,
 					0x04);
-	if (retval < 0)
+	if (retval < 0) {
 		dev_err(dev, "%s:Unable to leave sleep mode\n", __func__);
+		if (pdata->regulator_en)
+			regulator_disable(rmi4_data->regulator);
+		return retval;
+	}
 
+	enable_irq(pdata->irq_number);
 	return 0;
 }
 #endif
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops synaptics_rmi4_dev_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
+#ifndef CONFIG_FB
 	.suspend = synaptics_rmi4_suspend,
 	.resume  = synaptics_rmi4_resume,
 #endif
 };
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void synaptics_rmi4_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static int synaptics_rmi4_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
 {
-	struct synaptics_rmi4_data *rmi4_data = container_of(h,
-				struct synaptics_rmi4_data, early_suspend);
-	synaptics_rmi4_suspend(&rmi4_data->i2c_client->dev);
-}
+	struct fb_event *ev = arg;
+	struct synaptics_rmi4_data *rmi4_data = container_of(nb,
+		struct synaptics_rmi4_data, fb_notifier);
+	bool suspend;
+	int blank, ret;
 
-static void synaptics_rmi4_early_resume(struct early_suspend *h)
-{
-	struct synaptics_rmi4_data *rmi4_data = container_of(h,
-				struct synaptics_rmi4_data, early_suspend);
-	synaptics_rmi4_resume(&rmi4_data->i2c_client->dev);
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	suspend = blank == FB_BLANK_POWERDOWN;
+	if (suspend == rmi4_data->display_suspended)
+		return NOTIFY_OK;
+	if (suspend)
+		ret = synaptics_rmi4_suspend(&rmi4_data->i2c_client->dev);
+	else
+		ret = synaptics_rmi4_resume(&rmi4_data->i2c_client->dev);
+	if (ret)
+		dev_warn(&rmi4_data->i2c_client->dev,
+			 "display power transition failed: %d\n", ret);
+	else
+		rmi4_data->display_suspended = suspend;
+	return NOTIFY_OK;
 }
 #endif
 

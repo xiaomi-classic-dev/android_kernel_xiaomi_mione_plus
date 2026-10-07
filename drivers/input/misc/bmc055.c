@@ -21,8 +21,8 @@
 #include <linux/delay.h>
 #include <linux/uaccess.h>
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/fb.h>
 #endif
 
 #include <linux/input/bmc055.h>
@@ -70,9 +70,9 @@
 #define PDEBUG(fmt, args...)
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void bmc055_early_suspend(struct early_suspend *h);
-static void bmc055_late_resume(struct early_suspend *h);
+#ifdef CONFIG_FB
+static int bmc055_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg);
 #endif
 
 /*user defined Structures*/
@@ -143,8 +143,9 @@ struct bma255_data {
 struct bmc055_data {
 	struct i2c_client *bmc055_client;
 	struct mutex bmc055_mutex;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+	bool fb_suspended;
 #endif
 	struct bma255_data acc;
 	struct bmm050_data mag;
@@ -1523,7 +1524,7 @@ static int bmm_post_resume(struct bmm050_data *client_data)
 	return err;
 }
 
-void bmm_early_suspend(struct bmm050_data *client_data)
+void bmm_display_suspend(struct bmm050_data *client_data)
 {
 	int err = 0;
 	u8 power_mode;
@@ -1543,7 +1544,7 @@ void bmm_early_suspend(struct bmm050_data *client_data)
 
 }
 
-void bmm_late_resume(struct bmm050_data *client_data)
+void bmm_display_resume(struct bmm050_data *client_data)
 {
 	int err = 0;
 	struct bmc055_data *bmc055_data = container_of(client_data,
@@ -1560,12 +1561,12 @@ void bmm_late_resume(struct bmm050_data *client_data)
 	mutex_unlock(&bmc055_data->bmc055_mutex);
 }
 #else
-void bmm_early_suspend(struct bmm050_data *client_data)
+void bmm_display_suspend(struct bmm050_data *client_data)
 {
 
 }
 
-void bmm_late_resume(struct bmm050_data *client_data)
+void bmm_display_resume(struct bmm050_data *client_data)
 {
 
 }
@@ -2652,8 +2653,8 @@ exit:
 	return err;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-void bma255_early_suspend(struct bma255_data *data)
+#ifdef CONFIG_FB
+void bma255_display_suspend(struct bma255_data *data)
 {
 	struct bmc055_data *bmc055_data = container_of(data,
 						       struct bmc055_data, acc);
@@ -2667,7 +2668,7 @@ void bma255_early_suspend(struct bma255_data *data)
 	mutex_unlock(&bmc055_data->bmc055_mutex);
 }
 
-void bma255_late_resume(struct bma255_data *data)
+void bma255_display_resume(struct bma255_data *data)
 {
 	unsigned long delay_ms = atomic_read(&data->delay) / 1000000;
 	struct bmc055_data *bmc055_data = container_of(data,
@@ -2722,15 +2723,17 @@ static int bmc055_probe(struct i2c_client *client,
 	if (err < 0)
 		goto kfree_exit_acc;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	data->early_suspend.suspend = bmc055_early_suspend;
-	data->early_suspend.resume = bmc055_late_resume;
-	register_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	data->fb_notifier.notifier_call = bmc055_fb_event;
+	err = fb_register_client(&data->fb_notifier);
+	if (err)
+		goto kfree_exit_mag;
 #endif
 
 	return 0;
 
+kfree_exit_mag:
+	bmm_remove(&data->mag);
 kfree_exit_acc:		/* free memory for acc sensor's input */
 	bma255_remove(&data->acc);
 
@@ -2745,23 +2748,34 @@ exit:
 	return err;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void bmc055_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static int bmc055_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
 {
-	struct bmc055_data *data =
-	    container_of(h, struct bmc055_data, early_suspend);
+	struct fb_event *ev = arg;
+	struct bmc055_data *data = container_of(nb,
+		struct bmc055_data, fb_notifier);
+	int blank;
+	bool suspend;
 
-	bma255_early_suspend(&data->acc);
-	bmm_early_suspend(&data->mag);
-}
-
-static void bmc055_late_resume(struct early_suspend *h)
-{
-	struct bmc055_data *data =
-	    container_of(h, struct bmc055_data, early_suspend);
-
-	bma255_late_resume(&data->acc);
-	bmm_late_resume(&data->mag);
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	suspend = blank == FB_BLANK_POWERDOWN;
+	if (data->fb_suspended == suspend)
+		return NOTIFY_OK;
+	if (suspend) {
+		bma255_display_suspend(&data->acc);
+		bmm_display_suspend(&data->mag);
+	} else {
+		bma255_display_resume(&data->acc);
+		bmm_display_resume(&data->mag);
+	}
+	data->fb_suspended = suspend;
+	return NOTIFY_OK;
 }
 #endif
 
@@ -2769,6 +2783,9 @@ static int bmc055_remove(struct i2c_client *client)
 {
 	struct bmc055_data *data = i2c_get_clientdata(client);
 
+#ifdef CONFIG_FB
+	fb_unregister_client(&data->fb_notifier);
+#endif
 	bma255_remove(&data->acc);
 	bmm_remove(&data->mag);
 	kfree(data);

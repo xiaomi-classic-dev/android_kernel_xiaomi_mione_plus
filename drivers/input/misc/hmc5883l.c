@@ -23,8 +23,8 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/input/hmc5883l.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/fb.h>
 #endif
 
 /* hmc5883l register list */
@@ -98,8 +98,9 @@ struct hmc5883l_data {
 	struct mutex		mutex;
 	struct input_dev	*input;
 	struct i2c_client	*client;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend	early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+	bool fb_suspended;
 #endif
 	bool			opened;
 	bool			enabled;
@@ -694,7 +695,7 @@ static int hmc5883l_teardown(struct hmc5883l_data *data)
 		return 0;
 }
 
-#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) || defined(CONFIG_FB)
 static int hmc5883l_suspend(struct device *dev)
 {
 	int			error = 0;
@@ -724,26 +725,39 @@ static int hmc5883l_resume(struct device *dev)
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops hmc5883l_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
+#ifndef CONFIG_FB
 	.suspend	= hmc5883l_suspend,
 	.resume		= hmc5883l_resume,
 #endif
 };
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void hmc5883l_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static int hmc5883l_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
 {
-	struct hmc5883l_data *data = container_of(h,
-			struct hmc5883l_data, early_suspend);
-	hmc5883l_suspend(&data->client->dev);
-}
+	struct fb_event *ev = arg;
+	struct hmc5883l_data *data = container_of(nb,
+		struct hmc5883l_data, fb_notifier);
+	bool suspend;
+	int blank, ret;
 
-static void hmc5883l_early_resume(struct early_suspend *h)
-{
-	struct hmc5883l_data *data = container_of(h,
-			struct hmc5883l_data, early_suspend);
-	hmc5883l_resume(&data->client->dev);
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	suspend = blank == FB_BLANK_POWERDOWN;
+	if (data->fb_suspended == suspend)
+		return NOTIFY_OK;
+	ret = suspend ? hmc5883l_suspend(&data->client->dev) :
+		hmc5883l_resume(&data->client->dev);
+	if (ret)
+		dev_warn(&data->client->dev, "display power update failed: %d\n", ret);
+	else
+		data->fb_suspended = suspend;
+	return NOTIFY_OK;
 }
 #endif
 
@@ -856,15 +870,17 @@ static int hmc5883l_probe(struct i2c_client *client,
 		goto exit_free_phys;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	data->early_suspend.suspend = hmc5883l_early_suspend;
-	data->early_suspend.resume = hmc5883l_early_resume;
-	register_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	data->fb_notifier.notifier_call = hmc5883l_fb_event;
+	error = fb_register_client(&data->fb_notifier);
+	if (error)
+		goto exit_free_irq;
 #endif
 
 	goto exit; /* all is fine */
 
+exit_free_irq:
+	free_irq(client->irq, data);
 exit_free_phys:
 	kfree(data->input->phys);
 exit_unregister_device:
@@ -887,8 +903,8 @@ static int hmc5883l_remove(struct i2c_client *client)
 	struct hmc5883l_data *data;
 	data = i2c_get_clientdata(client);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&data->fb_notifier);
 #endif
 
 	cancel_delayed_work(&data->work);

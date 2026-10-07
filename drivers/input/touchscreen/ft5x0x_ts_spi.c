@@ -80,7 +80,7 @@ static const struct ft5x0x_bus_ops ft5x0x_spi_bops = {
 	.write   = ft5x0x_spi_write,
 };
 
-#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) && !defined(CONFIG_FB)
 static int ft5x0x_spi_suspend(struct device *dev)
 {
 	return ft5x0x_suspend(dev_get_drvdata(dev));
@@ -128,7 +128,7 @@ static struct spi_driver ft5x0x_spi_driver = {
 	.driver = {
 		.name  = "ft5x0x_spi",
 		.owner = THIS_MODULE,
-#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) && !defined(CONFIG_FB)
 		.pm    = &ft5x0x_spi_pm_ops,
 #endif
 	},

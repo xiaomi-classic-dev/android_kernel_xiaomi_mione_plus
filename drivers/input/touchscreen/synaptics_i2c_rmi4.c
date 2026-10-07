@@ -2507,7 +2507,8 @@ static int fb_notifier_callback(struct notifier_block *self,
 	struct synaptics_rmi4_data *rmi4_data =
 		container_of(self, struct synaptics_rmi4_data, fb_notif);
 
-	if (evdata && evdata->data && event == FB_EVENT_BLANK &&
+	if (evdata && evdata->info && evdata->info->node == 0 &&
+		evdata->data && event == FB_EVENT_BLANK &&
 		rmi4_data && rmi4_data->i2c_client) {
 		blank = evdata->data;
 		if (*blank == FB_BLANK_UNBLANK)

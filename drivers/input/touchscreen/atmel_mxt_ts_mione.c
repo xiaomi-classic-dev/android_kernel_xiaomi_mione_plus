@@ -26,8 +26,8 @@
 #include <linux/gpio.h>
 #include <linux/power_supply.h>
 #include <linux/workqueue.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/fb.h>
 #endif
 
 /* Slave addresses */
@@ -344,8 +344,9 @@ struct mxt_data {
 	struct mutex mutex;
 	unsigned long dbgdump;
 	struct delayed_work force_calibrate_delayed_work;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+	bool fb_suspended;
 #endif
 	bool suspended;
 	bool antipalm_disabled;
@@ -2073,7 +2074,7 @@ static int mxt_teardown(struct mxt_data *data)
 		return 0;
 }
 
-#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) || defined(CONFIG_FB)
 static int mxt_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -2106,24 +2107,39 @@ static int mxt_resume(struct device *dev)
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops mxt_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
+#ifndef CONFIG_FB
 	.suspend = mxt_suspend,
 	.resume = mxt_resume,
 #endif
 };
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void mxt_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static int mxt_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
 {
-	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
-	mxt_suspend(&data->client->dev);
-}
+	struct fb_event *ev = arg;
+	struct mxt_data *data = container_of(nb,
+		struct mxt_data, fb_notifier);
+	bool suspend;
+	int blank, ret;
 
-static void mxt_early_resume(struct early_suspend *h)
-{
-	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
-	mxt_resume(&data->client->dev);
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	suspend = blank == FB_BLANK_POWERDOWN;
+	if (data->fb_suspended == suspend)
+		return NOTIFY_OK;
+	ret = suspend ? mxt_suspend(&data->client->dev) :
+		mxt_resume(&data->client->dev);
+	if (ret)
+		dev_warn(&data->client->dev, "display power update failed: %d\n", ret);
+	else
+		data->fb_suspended = suspend;
+	return NOTIFY_OK;
 }
 #endif
 
@@ -2220,12 +2236,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	if (error)
 		goto err_put_vkeys;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	data->early_suspend.suspend = mxt_early_suspend;
-	data->early_suspend.resume = mxt_early_resume;
-	register_early_suspend(&data->early_suspend);
-#endif
+
 
 	sysfs_bin_attr_init(&data->mem_access_attr);
 	data->mem_access_attr.attr.name = "mem_access";
@@ -2241,7 +2252,19 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		goto err_remove_sysfs_group;
 	}
 
+#ifdef CONFIG_FB
+	data->fb_notifier.notifier_call = mxt_fb_event;
+	error = fb_register_client(&data->fb_notifier);
+	if (error)
+		goto err_remove_bin;
+#endif
+
 	return 0;
+
+err_remove_bin:
+	sysfs_remove_bin_file(&client->dev.kobj, &data->mem_access_attr);
+	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
+	goto err_put_vkeys;
 
 err_put_vkeys:
 	kobject_put(data->vkeys_dir);
@@ -2274,8 +2297,8 @@ static int __devexit mxt_remove(struct i2c_client *client)
 	struct mxt_data *data = i2c_get_clientdata(client);
 	struct mxt_platform_data *pdata = client->dev.platform_data;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&data->fb_notifier);
 #endif
 
 	sysfs_remove_bin_file(&client->dev.kobj, &data->mem_access_attr);
