@@ -1118,6 +1118,11 @@ static int audio_release(struct inode *inode, struct file *file)
 {
 	struct audio *audio = file->private_data;
 
+#ifdef CONFIG_FB
+	if (audio->fb_registered)
+		fb_unregister_client(&audio->fb_notifier);
+#endif
+
 	pr_info("%s: audio instance 0x%08x freeing, session %d\n", __func__,
 		(int)audio, audio->ac->session);
 
@@ -1133,9 +1138,7 @@ static int audio_release(struct inode *inode, struct file *file)
 	q6asm_audio_client_free(audio->ac);
 	audlpa_reset_ion_region(audio);
 	ion_client_destroy(audio->client);
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&audio->suspend_ctl.node);
-#endif
+
 	audio->opened = 0;
 	audio->out_enabled = 0;
 	audio->out_prefill = 0;
@@ -1183,25 +1186,29 @@ static void audlpa_post_event(struct audio *audio, int type,
 	wake_up(&audio->event_wait);
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void audlpa_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static int audlpa_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
 {
-	struct audlpa_suspend_ctl *ctl =
-		container_of(h, struct audlpa_suspend_ctl, node);
-	union msm_audio_event_payload payload;
+	struct fb_event *ev = arg;
+	struct audio *audio = container_of(nb, struct audio, fb_notifier);
+	union msm_audio_event_payload payload = { 0 };
+	int blank;
+	bool screen_off;
 
-	pr_debug("%s:\n", __func__);
-	audlpa_post_event(ctl->audio, AUDIO_EVENT_SUSPEND, payload);
-}
-
-static void audlpa_resume(struct early_suspend *h)
-{
-	struct audlpa_suspend_ctl *ctl =
-		container_of(h, struct audlpa_suspend_ctl, node);
-	union msm_audio_event_payload payload;
-
-	pr_debug("%s:\n", __func__);
-	audlpa_post_event(ctl->audio, AUDIO_EVENT_RESUME, payload);
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	screen_off = blank == FB_BLANK_POWERDOWN;
+	if (audio->screen_off != screen_off) {
+		audlpa_post_event(audio, screen_off ? AUDIO_EVENT_SUSPEND :
+			AUDIO_EVENT_RESUME, payload);
+		audio->screen_off = screen_off;
+	}
+	return NOTIFY_OK;
 }
 #endif
 
@@ -1264,7 +1271,6 @@ static int audio_open(struct inode *inode, struct file *file)
 	/* 4 bytes represents decoder number, 1 byte for terminate string */
 	char name[sizeof "msm_lpa_" + 5];
 #endif
-	char wake_lock_name[24];
 
 	/* Allocate audio instance, set to zero */
 	audio = kzalloc(sizeof(struct audio), GFP_KERNEL);
@@ -1325,9 +1331,9 @@ static int audio_open(struct inode *inode, struct file *file)
 	init_waitqueue_head(&audio->wait);
 	init_waitqueue_head(&audio->event_wait);
 	spin_lock_init(&audio->event_queue_lock);
-	snprintf(wake_lock_name, sizeof wake_lock_name, "audio_lpa_%x",
+	snprintf(audio->wake_lock_name, sizeof audio->wake_lock_name, "audio_lpa_%x",
 		audio->ac->session);
-	wake_lock_init(&audio->wakelock, WAKE_LOCK_SUSPEND, wake_lock_name);
+	wake_lock_init(&audio->wakelock, WAKE_LOCK_SUSPEND, audio->wake_lock_name);
 
 	audio->out_sample_rate = 44100;
 	audio->out_channel_mode = 2;
@@ -1361,13 +1367,6 @@ static int audio_open(struct inode *inode, struct file *file)
 	if (IS_ERR(audio->dentry))
 		pr_err("%s: debugfs_create_file failed\n", __func__);
 #endif
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	audio->suspend_ctl.node.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;
-	audio->suspend_ctl.node.resume = audlpa_resume;
-	audio->suspend_ctl.node.suspend = audlpa_suspend;
-	audio->suspend_ctl.audio = audio;
-	register_early_suspend(&audio->suspend_ctl.node);
-#endif
 	for (i = 0; i < AUDLPA_EVENT_NUM; i++) {
 		e_node = kmalloc(sizeof(struct audlpa_event), GFP_KERNEL);
 		if (e_node)
@@ -1386,6 +1385,16 @@ static int audio_open(struct inode *inode, struct file *file)
 		goto err;
 	}
 	pr_debug("Allocating ION clinet in audio_open %p", audio->client);
+#ifdef CONFIG_FB
+	audio->fb_notifier.notifier_call = audlpa_fb_event;
+	rc = fb_register_client(&audio->fb_notifier);
+	if (rc) {
+		audio_release(inode, file);
+		file->private_data = NULL;
+		return rc;
+	}
+	audio->fb_registered = true;
+#endif
 done:
 	return rc;
 err:

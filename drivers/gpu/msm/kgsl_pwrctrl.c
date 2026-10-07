@@ -959,7 +959,15 @@ int kgsl_pwrctrl_init(struct kgsl_device *device)
 
 
 	pm_runtime_enable(device->parentdev);
-	register_early_suspend(&device->display_off);
+#ifdef CONFIG_FB
+	device->display_notifier.notifier_call = kgsl_fb_event;
+	result = fb_register_client(&device->display_notifier);
+	if (result) {
+		pm_runtime_disable(device->parentdev);
+		goto done;
+	}
+	device->display_notifier_registered = true;
+#endif
 	return result;
 
 clk_err:
@@ -979,7 +987,12 @@ void kgsl_pwrctrl_close(struct kgsl_device *device)
 	KGSL_PWR_INFO(device, "close device %d\n", device->id);
 
 	pm_runtime_disable(device->parentdev);
-	unregister_early_suspend(&device->display_off);
+#ifdef CONFIG_FB
+	if (device->display_notifier_registered) {
+		fb_unregister_client(&device->display_notifier);
+		device->display_notifier_registered = false;
+	}
+#endif
 
 	clk_put(pwr->ebi1_clk);
 

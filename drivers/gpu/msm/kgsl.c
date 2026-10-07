@@ -808,11 +808,9 @@ const struct dev_pm_ops kgsl_pm_ops = {
 };
 EXPORT_SYMBOL(kgsl_pm_ops);
 
-void kgsl_early_suspend_driver(struct early_suspend *h)
+static void kgsl_display_suspend(struct kgsl_device *device)
 {
-	struct kgsl_device *device = container_of(h,
-					struct kgsl_device, display_off);
-	KGSL_PWR_WARN(device, "early suspend start\n");
+	KGSL_PWR_WARN(device, "display suspend start\n");
 	mutex_lock(&device->mutex);
 
 	/* Only go to slumber if active_cnt is 0 */
@@ -823,9 +821,9 @@ void kgsl_early_suspend_driver(struct early_suspend *h)
 	}
 
 	mutex_unlock(&device->mutex);
-	KGSL_PWR_WARN(device, "early suspend end\n");
+	KGSL_PWR_WARN(device, "display suspend end\n");
 }
-EXPORT_SYMBOL(kgsl_early_suspend_driver);
+
 
 int kgsl_suspend_driver(struct platform_device *pdev,
 					pm_message_t state)
@@ -842,11 +840,9 @@ int kgsl_resume_driver(struct platform_device *pdev)
 }
 EXPORT_SYMBOL(kgsl_resume_driver);
 
-void kgsl_late_resume_driver(struct early_suspend *h)
+static void kgsl_display_resume(struct kgsl_device *device)
 {
-	struct kgsl_device *device = container_of(h,
-					struct kgsl_device, display_off);
-	KGSL_PWR_WARN(device, "late resume start\n");
+	KGSL_PWR_WARN(device, "display resume start\n");
 	mutex_lock(&device->mutex);
 	device->pwrctrl.restore_slumber = false;
 	if (device->pwrscale.policy == NULL)
@@ -862,7 +858,7 @@ void kgsl_late_resume_driver(struct early_suspend *h)
 	 * the desired state here.
 	 *
 	 * Except if active_cnt is non zero which means that
-	 * we probably went to early_suspend with it non zero
+	 * we probably went to display suspend with it non zero
 	 * and thus the system is still in an active state.
 	 */
 
@@ -872,9 +868,32 @@ void kgsl_late_resume_driver(struct early_suspend *h)
 	}
 
 	mutex_unlock(&device->mutex);
-	KGSL_PWR_WARN(device, "late resume end\n");
+	KGSL_PWR_WARN(device, "display resume end\n");
 }
-EXPORT_SYMBOL(kgsl_late_resume_driver);
+int kgsl_fb_event(struct notifier_block *nb, unsigned long event, void *arg)
+{
+	struct fb_event *ev = arg;
+	struct kgsl_device *device = container_of(nb,
+		struct kgsl_device, display_notifier);
+	int blank;
+	bool suspend;
+
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+	suspend = blank == FB_BLANK_POWERDOWN;
+	if (device->display_suspended != suspend) {
+		if (suspend)
+			kgsl_display_suspend(device);
+		else
+			kgsl_display_resume(device);
+		device->display_suspended = suspend;
+	}
+	return NOTIFY_OK;
+}
 
 /*
  * kgsl_destroy_process_private() - Cleanup function to free process private
