@@ -514,7 +514,7 @@ static struct gpiomux_setting boot_pin_cfg = {
 	.dir = GPIOMUX_OUT_HIGH,
 };
 
-#ifdef CONFIG_HAPTIC_ISA1200
+#ifdef CONFIG_HAPTIC_ISA1200_MIONE
 static struct gpiomux_setting isa1200_en_actv_cfg = {
 	.func = GPIOMUX_FUNC_GPIO,
 	.drv = GPIOMUX_DRV_2MA,
@@ -1891,7 +1891,7 @@ static struct msm_gpiomux_config msm8x60_mione_configs[] __initdata = {
 	{.gpio = 10, /* HW EN */
 		.settings = {[GPIOMUX_ACTIVE] = &leds_active_cfg,		[GPIOMUX_SUSPENDED] = &leds_boot_cfg,},
     },
-#ifdef CONFIG_HAPTIC_ISA1200
+#ifdef CONFIG_HAPTIC_ISA1200_MIONE
 	{.gpio = 24,
 		.settings = {[GPIOMUX_ACTIVE] = &isa1200_en_actv_cfg,		[GPIOMUX_SUSPENDED] = &isa1200_en_susp_cfg,},		},
 	{.gpio = 25,
