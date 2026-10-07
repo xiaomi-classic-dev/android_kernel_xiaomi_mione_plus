@@ -150,15 +150,19 @@ struct dentry *mdp_dir;
 
 #if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
 static int mdp_suspend(struct platform_device *pdev, pm_message_t state);
+static int mdp_resume(struct platform_device *pdev);
 #else
 #define mdp_suspend NULL
+#define mdp_resume NULL
 #endif
 
 struct timeval mdp_dma2_timeval;
 struct timeval mdp_ppp_timeval;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static struct early_suspend early_suspend;
+#ifdef CONFIG_FB
+static bool mdp_screen_off;
+static bool mdp_resume_pending;
+static struct notifier_block mdp_fb_notifier;
 #endif
 
 static u32 mdp_irq;
@@ -2349,7 +2353,7 @@ static struct platform_driver mdp_driver = {
 	.remove = mdp_remove,
 #ifndef CONFIG_HAS_EARLYSUSPEND
 	.suspend = mdp_suspend,
-	.resume = NULL,
+	.resume = mdp_resume,
 #endif
 	.shutdown = NULL,
 	.driver = {
@@ -3424,8 +3428,8 @@ static int mdp_suspend(struct platform_device *pdev, pm_message_t state)
 }
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void mdp_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_PM
+static void mdp_display_suspend(void)
 {
 	mdp_suspend_sub();
 #ifdef CONFIG_FB_MSM_DTV
@@ -3434,12 +3438,54 @@ static void mdp_early_suspend(struct early_suspend *h)
 	mdp_footswitch_ctrl(FALSE);
 }
 
-static void mdp_early_resume(struct early_suspend *h)
+static void mdp_display_resume(void)
 {
 	mdp_footswitch_ctrl(TRUE);
 	mutex_lock(&mdp_suspend_mutex);
 	mdp_suspended = FALSE;
 	mutex_unlock(&mdp_suspend_mutex);
+}
+#endif
+
+#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+static int mdp_resume(struct platform_device *pdev)
+{
+	if (pdev->id == 0 && !mdp_screen_off)
+		mdp_display_resume();
+	return 0;
+}
+#endif
+
+#if defined(CONFIG_FB) && defined(CONFIG_PM)
+static int mdp_fb_event(struct notifier_block *nb,
+		unsigned long event, void *data)
+{
+	struct fb_event *ev = data;
+	int blank;
+
+	if (!ev || !ev->info || ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+
+	/* Restore MDP/DSI rails before the panel's unblank operation. */
+	if (event == FB_EARLY_EVENT_BLANK && blank == FB_BLANK_UNBLANK &&
+	    mdp_screen_off) {
+		mdp_display_resume();
+		mdp_resume_pending = true;
+	} else if (event == FB_R_EARLY_EVENT_BLANK && mdp_resume_pending) {
+		mdp_display_suspend();
+		mdp_resume_pending = false;
+	} else if (event == FB_EVENT_BLANK) {
+		if (blank == FB_BLANK_POWERDOWN && !mdp_screen_off) {
+			/* The panel is already off; now release its dependencies. */
+			mdp_display_suspend();
+			mdp_screen_off = true;
+		} else if (blank == FB_BLANK_UNBLANK) {
+			mdp_screen_off = false;
+			mdp_resume_pending = false;
+		}
+	}
+	return NOTIFY_OK;
 }
 #endif
 
@@ -3466,14 +3512,20 @@ static int mdp_remove(struct platform_device *pdev)
 
 static int mdp_register_driver(void)
 {
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB - 1;
-	early_suspend.suspend = mdp_early_suspend;
-	early_suspend.resume = mdp_early_resume;
-	register_early_suspend(&early_suspend);
-#endif
+	int ret;
 
-	return platform_driver_register(&mdp_driver);
+#if defined(CONFIG_FB) && defined(CONFIG_PM)
+	mdp_fb_notifier.notifier_call = mdp_fb_event;
+	ret = fb_register_client(&mdp_fb_notifier);
+	if (ret)
+		return ret;
+#endif
+	ret = platform_driver_register(&mdp_driver);
+#if defined(CONFIG_FB) && defined(CONFIG_PM)
+	if (ret)
+		fb_unregister_client(&mdp_fb_notifier);
+#endif
+	return ret;
 }
 
 static int __init mdp_driver_init(void)
