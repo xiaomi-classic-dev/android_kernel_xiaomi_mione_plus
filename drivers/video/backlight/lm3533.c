@@ -80,8 +80,7 @@ static int saved_main_lcd_level = DEFAULT_BRIGHTNESS;
 static int backlight_status = BL_ON;
 static struct lm3533_device *main_lm3533_dev;
 
-#if !defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) && \
-	!defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL)
+#if !defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) &&  !defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL)
 #endif
 
 static void lm3533_hw_reset(void)
@@ -169,15 +168,6 @@ static void lm3533_set_main_current_level(struct i2c_client *client, int level)
 void lm3533_backlight_on(int level)
 {
 
-#if 0 && \
-	(defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) || \
-	defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL))
-
-	if (is_early_suspended) {
-		requested_in_early_suspend_lcd_level = level;
-		return;
-	}
-#endif /* 0 */
 	if (backlight_status == BL_OFF) {
 		lm3533_hw_reset();
 		lm3533_write_reg(main_lm3533_dev->client, 0x10, 0x0);
@@ -189,8 +179,7 @@ void lm3533_backlight_on(int level)
 		lm3533_write_reg(main_lm3533_dev->client, 0x1A, 0x00);
 		lm3533_write_reg(main_lm3533_dev->client, 0x1F, 0x13);
 		lm3533_write_reg(main_lm3533_dev->client, 0x27, 0x1);
-#if defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) || \
-		defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL)
+#if defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) ||  defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL)
 		lm3533_write_reg(main_lm3533_dev->client, 0x2C, 0xC);
 		lm3533_write_reg(main_lm3533_dev->client, 0x12, 0x9);
 		lm3533_write_reg(main_lm3533_dev->client, 0x13, 0x9);
@@ -238,35 +227,6 @@ void lm3533_lcd_backlight_set_level(int level)
 }
 EXPORT_SYMBOL(lm3533_lcd_backlight_set_level);
 
-#if 0 && \
-	(defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) || \
-	defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL))
-
-void lm3533_early_suspend(struct early_suspend * h)
-{
-	is_early_suspended = true;
-
-	pr_info("%s[Start] backlight_status: %d\n", __func__,
-			backlight_status);
-	if (backlight_status == BL_OFF)
-		return;
-
-	lm3533_lcd_backlight_set_level(0);
-}
-
-void lm3533_late_resume(struct early_suspend * h)
-{
-	is_early_suspended = false;
-
-	pr_info("%s[Start] backlight_status: %d\n", __func__,
-			backlight_status);
-	if (backlight_status == BL_ON)
-		return;
-
-	lm3533_lcd_backlight_set_level(requested_in_early_suspend_lcd_level);
-	return;
-}
-#endif /* 0 */
 
 static int bl_set_intensity(struct backlight_device *bd)
 {
@@ -317,8 +277,7 @@ static ssize_t lcd_backlight_store_level(struct device *dev,
 
 static int lm3533_bl_resume(struct i2c_client *client)
 {
-#if defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) || \
-	defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL)
+#if defined(CONFIG_FB_MSM_MIPI_LGIT_CMD_WVGA_INVERSE_PT_PANEL) ||  defined(CONFIG_FB_MSM_MIPI_LGIT_VIDEO_WVGA_INVERSE_PT_PANEL)
 	lm3533_lcd_backlight_set_level(saved_main_lcd_level);
 #else
 	lm3533_backlight_on(saved_main_lcd_level);

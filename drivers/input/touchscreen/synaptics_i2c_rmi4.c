@@ -2038,7 +2038,7 @@ static int __devinit synaptics_rmi4_probe(struct i2c_client *client,
 {
 	int retval = 0;
 	unsigned char ii;
-	unsigned char attr_count;
+	int attr_count;
 	struct synaptics_rmi4_f1a_handle *f1a;
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data;
@@ -2355,7 +2355,7 @@ err_input_device:
  */
 static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
 {
-	unsigned char attr_count;
+	int attr_count;
 	struct synaptics_rmi4_fn *fhandler;
 	struct synaptics_rmi4_data *rmi4_data = i2c_get_clientdata(client);
 	struct synaptics_rmi4_device_info *rmi;
