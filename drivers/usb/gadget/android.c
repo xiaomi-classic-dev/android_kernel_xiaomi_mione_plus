@@ -361,14 +361,21 @@ struct functionfs_config {
 	bool opened;
 	bool enabled;
 	struct ffs_data *data;
+	struct android_dev *dev;
 };
 
 static int ffs_function_init(struct android_usb_function *f,
 			     struct usb_composite_dev *cdev)
 {
-	f->config = kzalloc(sizeof(struct functionfs_config), GFP_KERNEL);
-	if (!f->config)
+	struct functionfs_config *config;
+
+	config = kzalloc(sizeof(*config), GFP_KERNEL);
+	if (!config)
 		return -ENOMEM;
+
+	/* FunctionFS can open before it is selected in a USB configuration. */
+	config->dev = cdev_to_android_dev(cdev);
+	f->config = config;
 
 	return functionfs_init();
 }
@@ -470,8 +477,8 @@ static struct android_usb_function ffs_function = {
 
 static int functionfs_ready_callback(struct ffs_data *ffs)
 {
-	struct android_dev *dev = ffs_function.android_dev;
 	struct functionfs_config *config = ffs_function.config;
+	struct android_dev *dev = config->dev;
 	int ret = 0;
 
 	mutex_lock(&dev->mutex);
@@ -493,8 +500,8 @@ err:
 
 static void functionfs_closed_callback(struct ffs_data *ffs)
 {
-	struct android_dev *dev = ffs_function.android_dev;
 	struct functionfs_config *config = ffs_function.config;
+	struct android_dev *dev = config->dev;
 
 	mutex_lock(&dev->mutex);
 
