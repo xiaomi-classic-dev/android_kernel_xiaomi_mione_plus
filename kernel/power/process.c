@@ -17,7 +17,6 @@
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <linux/kmod.h>
-#include <linux/wakelock.h>
 #include "power.h"
 
 /* 
@@ -71,10 +70,6 @@ static int try_to_freeze_tasks(bool user_only)
 			todo += wq_busy;
 		}
 
-		if (todo && has_wake_lock(WAKE_LOCK_SUSPEND)) {
-			wakeup = 1;
-			break;
-		}
 		if (!todo || time_after(jiffies, end_time))
 			break;
 
