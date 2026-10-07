@@ -3036,6 +3036,7 @@ wl_cfg80211_get_station(struct wiphy *wiphy, struct net_device *dev,
 			sta->idle * 1000));
 #endif
 	} else if (wl_get_mode_by_netdev(wl, dev) == WL_MODE_BSS) {
+		get_pktcnt_t pktcnt;
 		u8 *curmacp = wl_read_prof(wl, dev, WL_PROF_BSSID);
 		err = -ENODEV;
 		if (!wl_get_drv_status(wl, CONNECTED, dev) ||
@@ -3071,6 +3072,22 @@ wl_cfg80211_get_station(struct wiphy *wiphy, struct net_device *dev,
 		sinfo->filled |= STATION_INFO_SIGNAL;
 		sinfo->signal = rssi;
 		WL_DBG(("RSSI %d dBm\n", rssi));
+
+		memset(&pktcnt, 0, sizeof(pktcnt));
+		err = wldev_ioctl(dev, WLC_GET_PKTCNTS, &pktcnt,
+				  sizeof(pktcnt), false);
+		if (err) {
+			WL_ERR(("Could not get packet counters (%d)\n", err));
+			return err;
+		}
+		sinfo->filled |= STATION_INFO_RX_PACKETS |
+				 STATION_INFO_RX_DROP_MISC |
+				 STATION_INFO_TX_PACKETS |
+				 STATION_INFO_TX_FAILED;
+		sinfo->rx_packets = dtoh32(pktcnt.rx_good_pkt);
+		sinfo->rx_dropped_misc = dtoh32(pktcnt.rx_bad_pkt);
+		sinfo->tx_packets = dtoh32(pktcnt.tx_good_pkt);
+		sinfo->tx_failed = dtoh32(pktcnt.tx_bad_pkt);
 
 get_station_err:
 		if (err && (err != -ETIMEDOUT) && (err != -EIO)) {
