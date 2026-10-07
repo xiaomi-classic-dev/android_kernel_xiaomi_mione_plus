@@ -2029,7 +2029,7 @@ power_off:
  * as an input driver, turns on the power to the sensor, queries the
  * sensor for its supported Functions and characteristics, registers
  * the driver to the input subsystem, sets up the interrupt, handles
- * the registration of the early_suspend and late_resume functions,
+ * the registration of framebuffer power notifications,
  * and creates a work queue for detection of other expansion Function
  * modules.
  */
@@ -2409,7 +2409,7 @@ static int __devexit synaptics_rmi4_remove(struct i2c_client *client)
  /**
  * synaptics_rmi4_sensor_sleep()
  *
- * Called by synaptics_rmi4_early_suspend() and synaptics_rmi4_suspend().
+ * Called when the primary framebuffer is powered down.
  *
  * This function stops finger data acquisition and puts the sensor to sleep.
  */
@@ -2645,7 +2645,7 @@ static int synaptics_rmi4_resume(struct device *dev)
 	return 0;
 }
 
-#if (!defined(CONFIG_FB) && 1)
+#if (!defined(CONFIG_FB))
 static const struct dev_pm_ops synaptics_rmi4_dev_pm_ops = {
 	.suspend = synaptics_rmi4_suspend,
 	.resume  = synaptics_rmi4_resume,

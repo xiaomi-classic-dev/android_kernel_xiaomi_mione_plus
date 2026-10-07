@@ -1570,7 +1570,7 @@ static irqreturn_t lsm303d_interrupt(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-#if defined(CONFIG_PM) || 0
+#if defined(CONFIG_PM)
 static int lsm303d_suspend(struct device *dev)
 {
 	int error = 0;

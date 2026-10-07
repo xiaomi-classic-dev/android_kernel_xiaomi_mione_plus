@@ -148,7 +148,7 @@ extern int first_pixel_start_y;
 struct dentry *mdp_dir;
 #endif
 
-#if defined(CONFIG_PM) && 1
+#if defined(CONFIG_PM)
 static int mdp_suspend(struct platform_device *pdev, pm_message_t state);
 static int mdp_resume(struct platform_device *pdev);
 #else
@@ -3411,7 +3411,7 @@ static void mdp_suspend_sub(void)
 }
 #endif
 
-#if defined(CONFIG_PM) && 1
+#if defined(CONFIG_PM)
 static int mdp_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	if (pdev->id == 0) {
@@ -3445,7 +3445,7 @@ static void mdp_display_resume(void)
 }
 #endif
 
-#if defined(CONFIG_PM) && 1
+#if defined(CONFIG_PM)
 static int mdp_resume(struct platform_device *pdev)
 {
 	if (pdev->id == 0 && !mdp_screen_off)

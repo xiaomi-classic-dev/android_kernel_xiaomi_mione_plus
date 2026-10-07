@@ -729,7 +729,7 @@ static int lis3dh_teardown(struct lis3dh_data *data)
 		return 0;
 }
 
-#if defined(CONFIG_PM) || defined(0)
+#if defined(CONFIG_PM)
 static int lis3dh_suspend(struct device *dev)
 {
 	int			error = 0;

@@ -91,7 +91,7 @@ typedef const struct si_pub si_t;
 bool g_set_essid_before_scan = TRUE;
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && 1
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 struct mutex g_wl_ss_scan_lock;
 #endif
 
@@ -120,7 +120,7 @@ static int wl_iw_softap_deassoc_stations(struct net_device *dev, u8 *mac);
 static int g_onoff = G_WLAN_SET_ON;
 wl_iw_extra_params_t g_wl_iw_params;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25)) && 1
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 25))
 
 static struct mutex wl_cache_lock;
 static struct mutex wl_softap_lock;
