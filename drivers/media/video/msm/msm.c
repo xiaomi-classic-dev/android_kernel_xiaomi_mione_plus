@@ -255,12 +255,10 @@ static void msm_cam_stop_hardware(struct msm_cam_v4l2_device *pcam)
 	pmctl = msm_camera_get_mctl(pcam->mctl_handle);
 	if (pmctl && pmctl->mctl_release) {
 		pr_err("%s: stopping hardware upon error\n", __func__);
-		/*do not send any commands to hardware after reaching this point*/
-		pmctl->mctl_cmd = NULL;
+		/* The controller serializes commands and makes release idempotent. */
 		rc = pmctl->mctl_release(pmctl);
 		if (rc < 0)
 			pr_err("mctl_release fails %d\n", rc);
-		pmctl->mctl_release = NULL;
 	}
 }
 
@@ -1685,10 +1683,13 @@ static int msm_cam_server_close_session(struct msm_cam_server_dev *ps,
 	}
 
 
+	/* Wait for daemon close before destroying the controller's lock. */
+	mutex_lock(&ps->server_lock);
 	atomic_dec(&ps->number_pcam_active);
 	ps->pcam_active = NULL;
 
 	msm_mctl_free(pcam);
+	mutex_unlock(&ps->server_lock);
 	return rc;
 }
 

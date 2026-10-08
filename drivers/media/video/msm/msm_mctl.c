@@ -191,7 +191,7 @@ static int msm_mctl_set_vfe_output_mode(struct msm_cam_media_controller
 
 /* called by the server or the config nodes to handle user space
 	commands*/
-static int msm_mctl_cmd(struct msm_cam_media_controller *p_mctl,
+static int msm_mctl_do_cmd(struct msm_cam_media_controller *p_mctl,
 			unsigned int cmd, unsigned long arg)
 {
 	int rc = -EINVAL;
@@ -415,6 +415,23 @@ static int msm_mctl_cmd(struct msm_cam_media_controller *p_mctl,
 	}
 	D("%s: !!! cmd = %d, rc = %d\n",
 		__func__, _IOC_NR(cmd), rc);
+	return rc;
+}
+
+static int msm_mctl_cmd(struct msm_cam_media_controller *p_mctl,
+			unsigned int cmd, unsigned long arg)
+{
+	int rc;
+
+	if (!p_mctl)
+		return -EINVAL;
+
+	mutex_lock(&p_mctl->lock);
+	if (p_mctl->opencnt)
+		rc = msm_mctl_do_cmd(p_mctl, cmd, arg);
+	else
+		rc = -ENODEV;
+	mutex_unlock(&p_mctl->lock);
 	return rc;
 }
 
@@ -680,10 +697,21 @@ register_sdev_failed:
 static int msm_mctl_release(struct msm_cam_media_controller *p_mctl)
 {
 	int rc = 0;
-	struct msm_sensor_ctrl_t *s_ctrl = get_sctrl(p_mctl->sensor_sdev);
-	struct msm_camera_sensor_info *sinfo =
-		(struct msm_camera_sensor_info *) s_ctrl->sensordata;
-	struct msm_camera_device_platform_data *camdev = sinfo->pdata;
+	struct msm_sensor_ctrl_t *s_ctrl;
+	struct msm_camera_sensor_info *sinfo;
+	struct msm_camera_device_platform_data *camdev;
+
+	if (!p_mctl)
+		return -EINVAL;
+
+	mutex_lock(&p_mctl->lock);
+	/* Video close and daemon close can both reach this session. */
+	if (!p_mctl->opencnt)
+		goto out;
+	p_mctl->opencnt = 0;
+	s_ctrl = get_sctrl(p_mctl->sensor_sdev);
+	sinfo = (struct msm_camera_sensor_info *)s_ctrl->sensordata;
+	camdev = sinfo->pdata;
 
 	v4l2_subdev_call(p_mctl->sensor_sdev, core, ioctl,
 		VIDIOC_MSM_SENSOR_RELEASE, NULL);
@@ -729,6 +757,8 @@ static int msm_mctl_release(struct msm_cam_media_controller *p_mctl)
 	v4l2_subdev_call(p_mctl->sensor_sdev, core, s_power, 0);
 
 	pm_qos_update_request(&p_mctl->idle_pm_qos, PM_QOS_DEFAULT_VALUE);
+out:
+	mutex_unlock(&p_mctl->lock);
 	return rc;
 }
 
