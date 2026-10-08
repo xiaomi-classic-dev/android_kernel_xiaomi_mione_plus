@@ -2438,7 +2438,7 @@ static int do_tmpfile(int dfd, const char* pathname,
 	if (unlikely(error))
 		goto out;
 	/* we want directory to be writable */
-	error = inode_permission(nd->inode, MAY_WRITE | MAY_EXEC);
+	error = inode_permission2(nd->path.mnt, nd->inode, MAY_WRITE | MAY_EXEC);
 	if (error)
 		goto out2;
 	dentry = nd->path.dentry;
