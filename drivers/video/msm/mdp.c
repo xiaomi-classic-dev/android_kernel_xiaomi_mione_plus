@@ -3461,6 +3461,9 @@ static int mdp_fb_event(struct notifier_block *nb,
 	struct fb_event *ev = data;
 	int blank;
 
+	if (event != FB_EARLY_EVENT_BLANK && event != FB_R_EARLY_EVENT_BLANK &&
+	    event != FB_EVENT_BLANK)
+		return NOTIFY_DONE;
 	if (!ev || !ev->info || ev->info->node != 0 || !ev->data)
 		return NOTIFY_DONE;
 	blank = *(int *)ev->data;
