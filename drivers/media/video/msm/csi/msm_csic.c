@@ -267,6 +267,8 @@ static int msm_csic_init(struct v4l2_subdev *sd, uint32_t *csic_version)
 		rc = -ENOMEM;
 		return rc;
 	}
+	if (csic_dev->base)
+		return -EBUSY;
 
 	csic_dev->base = ioremap(csic_dev->mem->start,
 		resource_size(csic_dev->mem));
@@ -335,6 +337,8 @@ static int msm_csic_release(struct v4l2_subdev *sd)
 {
 	struct csic_device *csic_dev;
 	csic_dev = v4l2_get_subdevdata(sd);
+	if (!csic_dev->base)
+		return 0;
 
 	msm_csic_disable(sd);
 #if DBG_CSIC
@@ -351,6 +355,7 @@ static int msm_csic_release(struct v4l2_subdev *sd)
 
 	iounmap(csic_dev->base);
 	csic_dev->base = NULL;
+	csic_dev->hw_version = 0;
 	return 0;
 }
 
@@ -358,18 +363,36 @@ static long msm_csic_subdev_ioctl(struct v4l2_subdev *sd,
 			unsigned int cmd, void *arg)
 {
 	struct csic_cfg_params cfg_params;
+	struct csic_device *csic_dev = v4l2_get_subdevdata(sd);
+	long rc;
+
+	if (!csic_dev)
+		return -ENODEV;
+
+	/* Disable sleeps before its final MMIO writes; keep the mapping alive. */
+	mutex_lock(&csic_dev->mutex);
 	switch (cmd) {
 	case VIDIOC_MSM_CSIC_CFG:
+		if (!csic_dev->base || !arg) {
+			rc = -EINVAL;
+			break;
+		}
 		cfg_params.subdev = sd;
 		cfg_params.parms = arg;
-		return msm_csic_config((struct csic_cfg_params *)&cfg_params);
+		rc = msm_csic_config(&cfg_params);
+		break;
 	case VIDIOC_MSM_CSIC_INIT:
-		return msm_csic_init(sd, (uint32_t *)arg);
+		rc = msm_csic_init(sd, (uint32_t *)arg);
+		break;
 	case VIDIOC_MSM_CSIC_RELEASE:
-		return msm_csic_release(sd);
+		rc = msm_csic_release(sd);
+		break;
 	default:
-		return -ENOIOCTLCMD;
+		rc = -ENOIOCTLCMD;
+		break;
 	}
+	mutex_unlock(&csic_dev->mutex);
+	return rc;
 }
 
 static struct v4l2_subdev_core_ops msm_csic_subdev_core_ops = {
