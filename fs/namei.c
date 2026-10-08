@@ -2482,14 +2482,14 @@ static int do_tmpfile(int dfd, const char* pathname,
 	error = may_open(&nd->path, MAY_OPEN, op->open_flag);
 	if (error)
 		goto out2;
-	file->f_path.mnt = nd->path.mnt;
-	error = finish_open(file, nd->path.dentry, NULL);
-	if (error)
+	/* Transfer the open intent and take the file's own path references. */
+	file = nameidata_to_filp(nd);
+	if (IS_ERR(file)) {
+		error = PTR_ERR(file);
 		goto out2;
-	error = open_check_o_direct(file);
-	if (error) {
-		fput(file);
-	} else if (!(op->open_flag & O_EXCL)) {
+	}
+	error = 0;
+	if (!(op->open_flag & O_EXCL)) {
 		struct inode *inode = file->f_path.dentry->d_inode;
 		spin_lock(&inode->i_lock);
 		inode->i_state |= I_LINKABLE;
@@ -2521,6 +2521,8 @@ static struct file *path_openat(int dfd, const char *pathname,
 
 	if (unlikely(filp->f_flags & __O_TMPFILE)) {
 		error = do_tmpfile(dfd, pathname, nd, flags, op, filp);
+		if (error)
+			filp = ERR_PTR(error);
 		goto out2;
 	}
 
