@@ -36,6 +36,7 @@
 #include <linux/semaphore.h>
 #include <linux/uaccess.h>
 #include <mach/event_timer.h>
+#include <mach/mione_power_diag.h>
 #include <mach/clk.h>
 #include "mdp.h"
 #include "msm_fb.h"
@@ -3489,9 +3490,16 @@ static int mdp_fb_event(struct notifier_block *nb,
 	struct fb_event *ev = data;
 	int blank;
 
+	if (event == FB_EVENT_FB_REGISTERED && ev && ev->info &&
+	    ev->info->node == 0)
+		mione_power_trace(MIONE_FB_NOTIFY_ENTER, 0, event,
+			(u32)ev->data, (u32)ev->info, 0);
 	if (!ev || !ev->info || ev->info->node != 0 || !ev->data)
 		return NOTIFY_DONE;
 	blank = *(int *)ev->data;
+	if (event == FB_EVENT_FB_REGISTERED)
+		mione_power_trace(MIONE_FB_NOTIFY_RETURN, 0, event,
+			(u32)ev->data, (u32)blank, 0);
 
 	/* Restore MDP/DSI rails before the panel's unblank operation. */
 	if (event == FB_EARLY_EVENT_BLANK && blank == FB_BLANK_UNBLANK &&
