@@ -2431,7 +2431,7 @@ static int check_info(struct load_info *info)
 }
 
 /* Sets info->hdr and info->len. */
-int copy_module_from_user(const void __user *umod, unsigned long len,
+static int copy_module_from_user(const void __user *umod, unsigned long len,
 			  struct load_info *info)
 {
 	int err;
@@ -2449,9 +2449,10 @@ int copy_module_from_user(const void __user *umod, unsigned long len,
 	if (!info->hdr)
 		return -ENOMEM;
 
-	err = copy_from_user(info->hdr, umod, info->len);
-	if (err)
+	if (copy_from_user(info->hdr, umod, info->len) != 0) {
+		err = -EFAULT;
 		goto free_hdr;
+	}
 
 	err = check_info(info);
 	if (err)
@@ -2465,13 +2466,13 @@ free_hdr:
 }
 
 /* Sets info->hdr and info->len. */
-int copy_module_from_fd(int fd, struct load_info *info)
+static int copy_module_from_fd(int fd, struct load_info *info)
 {
 	struct file *file;
 	int err;
 	struct kstat stat;
 	unsigned long size;
-	off_t pos;
+	loff_t pos;
 	ssize_t bytes = 0;
 
 	file = fget(fd);
@@ -2485,6 +2486,15 @@ int copy_module_from_fd(int fd, struct load_info *info)
 	err = security_kernel_module_from_file(file);
 	if (err)
 		goto out;
+
+	if (stat.size < sizeof(*(info->hdr))) {
+		err = -ENOEXEC;
+		goto out;
+	}
+	if (stat.size > INT_MAX) {
+		err = -EFBIG;
+		goto out;
+	}
 
 	size = stat.size;
 	info->hdr = vmalloc(size);
