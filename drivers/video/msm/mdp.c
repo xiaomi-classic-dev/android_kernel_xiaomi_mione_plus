@@ -2895,6 +2895,9 @@ static int mdp_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	msm_fb_dev = platform_device_alloc("msm_fb", pdev->id);
+	MSM_FB_BOOT_TRACE("mdp probe enter fb=%d type=%d splash=%d\n",
+		mfd->index, mfd->panel.type,
+		mdp_pdata ? mdp_pdata->cont_splash_enabled : -1);
 	if (!msm_fb_dev)
 		return -ENOMEM;
 
@@ -2919,9 +2922,11 @@ static int mdp_probe(struct platform_device *pdev)
 	}
 
 	/* initialize Post Processing data*/
+	MSM_FB_BOOT_TRACE("mdp pp init enter fb=%d\n", mfd->index);
 	mdp_hist_lut_init();
 	mdp_histogram_init();
 	mdp_pp_initialized = TRUE;
+	MSM_FB_BOOT_TRACE("mdp pp init return fb=%d\n", mfd->index);
 
 	/* add panel data */
 	if (platform_device_add_data
@@ -2939,9 +2944,11 @@ static int mdp_probe(struct platform_device *pdev)
 			uint32 bpp = 3;
 			/*read panel wxh and calculate splash screen
 			  size*/
+			MSM_FB_BOOT_TRACE("mdp splash clock enter fb=%d\n", mfd->index);
 			mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 
 			mdp_clk_ctrl(1);
+			MSM_FB_BOOT_TRACE("mdp splash clock return fb=%d\n", mfd->index);
 
 			mdp_pdata->splash_screen_size =
 				inpdw(MDP_BASE + 0x90004);
@@ -2953,6 +2960,9 @@ static int mdp_probe(struct platform_device *pdev)
 
 			mdp_pdata->splash_screen_addr =
 				inpdw(MDP_BASE + 0x90008);
+			MSM_FB_BOOT_TRACE("mdp splash read fb=%d addr=%x size=%u\n",
+				mfd->index, mdp_pdata->splash_screen_addr,
+				mdp_pdata->splash_screen_size);
 
 			mfd->copy_splash_buf = dma_alloc_coherent(NULL,
 					mdp_pdata->splash_screen_size,
@@ -2988,7 +2998,9 @@ static int mdp_probe(struct platform_device *pdev)
 	pdata->late_init = NULL;
 	pdata->next = pdev;
 
+	MSM_FB_BOOT_TRACE("mdp clock on enter fb=%d\n", mfd->index);
 	mdp_clk_ctrl(1);
+	MSM_FB_BOOT_TRACE("mdp clock on return fb=%d\n", mfd->index);
 
 	mdp_prim_panel_type = mfd->panel.type;
 	switch (mfd->panel.type) {
@@ -3125,7 +3137,9 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->do_histogram = mdp_do_histogram;
 		mfd->start_histogram = mdp_histogram_start;
 		mfd->stop_histogram = mdp_histogram_stop;
+		MSM_FB_BOOT_TRACE("mdp cmd intf enter fb=%d\n", mfd->index);
 		mdp4_display_intf_sel(if_no, DSI_CMD_INTF);
+		MSM_FB_BOOT_TRACE("mdp cmd intf return fb=%d\n", mfd->index);
 #else
 		mfd->dma_fnc = mdp_dma2_update;
 		mfd->do_histogram = mdp_do_histogram;
@@ -3144,7 +3158,9 @@ static int mdp_probe(struct platform_device *pdev)
 		INIT_WORK(&mfd->dma_update_worker,
 			mdp_lcd_update_workqueue_handler);
 #endif
+		MSM_FB_BOOT_TRACE("mdp cmd vsync enter fb=%d\n", mfd->index);
 		mdp_config_vsync(mdp_init_pdev, mfd);
+		MSM_FB_BOOT_TRACE("mdp cmd vsync return fb=%d\n", mfd->index);
 		break;
 #endif
 
@@ -3261,9 +3277,12 @@ static int mdp_probe(struct platform_device *pdev)
 	}
 
 	if (mdp_rev >= MDP_REV_40) {
+		MSM_FB_BOOT_TRACE("mdp intf read enter fb=%d\n", mfd->index);
 		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 		mdp4_display_intf = inpdw(MDP_BASE + 0x0038);
 		mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
+		MSM_FB_BOOT_TRACE("mdp intf read return fb=%d value=%lx\n",
+			mfd->index, mdp4_display_intf);
 	}
 
 	frame_rate = mdp_get_panel_framerate(mfd);
@@ -3271,23 +3290,32 @@ static int mdp_probe(struct platform_device *pdev)
 		mfd->panel_info.frame_interval = 1000 / frame_rate;
 		mfd->cpu_pm_hdl = add_event_timer(NULL, (void *)mfd);
 	}
+	MSM_FB_BOOT_TRACE("mdp clock off enter fb=%d\n", mfd->index);
 	mdp_clk_ctrl(0);
+	MSM_FB_BOOT_TRACE("mdp clock off return fb=%d\n", mfd->index);
 
 #ifdef CONFIG_MSM_BUS_SCALING
+	MSM_FB_BOOT_TRACE("mdp bus register enter fb=%d\n", mfd->index);
 	if (mdp_bus_scale_register())
 		return -ENOMEM;
+	MSM_FB_BOOT_TRACE("mdp bus register return fb=%d\n", mfd->index);
 
 	/* req bus bandwidth immediately */
+	MSM_FB_BOOT_TRACE("mdp bus vote enter fb=%d bw=%llu\n",
+		mfd->index, mdp_max_bw);
 	mdp_bus_scale_update_request(mdp_max_bw,
 				     mdp_max_bw,
 				     mdp_max_bw,
 				     mdp_max_bw);
+	MSM_FB_BOOT_TRACE("mdp bus vote return fb=%d\n", mfd->index);
 #endif
 
 	/* set driver data */
 	platform_set_drvdata(msm_fb_dev, mfd);
 
+	MSM_FB_BOOT_TRACE("mdp add fb enter fb=%d\n", mfd->index);
 	rc = platform_device_add(msm_fb_dev);
+	MSM_FB_BOOT_TRACE("mdp add fb return fb=%d rc=%d\n", mfd->index, rc);
 	if (rc) {
 		goto mdp_probe_err;
 	}

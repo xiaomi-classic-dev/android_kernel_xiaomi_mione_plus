@@ -470,6 +470,9 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	if (mfd->key != MFD_KEY)
 		return -EINVAL;
 
+	MSM_FB_BOOT_TRACE("dsi probe enter fb=%d type=%d\n",
+		mfd->index, mfd->panel.type);
+
 	if (pdev_list_cnt >= MSM_FB_MAX_DEV_LIST)
 		return -ENOMEM;
 
@@ -588,6 +591,7 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	pll_divider_config.clk_rate = mfd->panel_info.clk_rate;
 
 	rc = mipi_dsi_clk_div_config(bpp, lanes, &dsi_pclk_rate);
+	MSM_FB_BOOT_TRACE("dsi divider return fb=%d rc=%d\n", mfd->index, rc);
 	if (rc)
 		goto mipi_dsi_probe_err;
 
@@ -605,7 +609,9 @@ static int mipi_dsi_probe(struct platform_device *pdev)
 	/*
 	 * register in mdp driver
 	 */
+	MSM_FB_BOOT_TRACE("dsi add mdp enter fb=%d\n", mfd->index);
 	rc = platform_device_add(mdp_dev);
+	MSM_FB_BOOT_TRACE("dsi add mdp return fb=%d rc=%d\n", mfd->index, rc);
 	if (rc)
 		goto mipi_dsi_probe_err;
 

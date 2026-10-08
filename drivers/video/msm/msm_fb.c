@@ -460,7 +460,9 @@ static int msm_fb_probe(struct platform_device *pdev)
 
 	bf_supported = mdp4_overlay_borderfill_supported();
 
+	MSM_FB_BOOT_TRACE("fb register enter fb=%d\n", mfd->index);
 	rc = msm_fb_register(mfd);
+	MSM_FB_BOOT_TRACE("fb register return fb=%d rc=%d\n", mfd->index, rc);
 	if (rc)
 		return rc;
 
@@ -1476,6 +1478,8 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	fbi->fix.smem_start = (unsigned long)fbram_phys;
 
 	if (fbi->fix.smem_start) {
+		MSM_FB_BOOT_TRACE("fb iommu map write enter fb=%d addr=%lx size=%u\n",
+			mfd->index, fbi->fix.smem_start, fbi->fix.smem_len);
 		msm_iommu_map_contig_buffer(fbi->fix.smem_start,
 					    DISPLAY_WRITE_DOMAIN,
 					    GEN_POOL,
@@ -1483,7 +1487,9 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 					    SZ_4K,
 					    0,
 					    &(mfd->display_iova));
+		MSM_FB_BOOT_TRACE("fb iommu map write return fb=%d\n", mfd->index);
 
+		MSM_FB_BOOT_TRACE("fb iommu map read enter fb=%d\n", mfd->index);
 		msm_iommu_map_contig_buffer(fbi->fix.smem_start,
 					    DISPLAY_READ_DOMAIN,
 					    GEN_POOL,
@@ -1491,7 +1497,9 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 					    SZ_4K,
 					    0,
 					    &(mfd->display_iova));
+		MSM_FB_BOOT_TRACE("fb iommu map read return fb=%d\n", mfd->index);
 
+		MSM_FB_BOOT_TRACE("fb iommu map rotator enter fb=%d\n", mfd->index);
 		msm_iommu_map_contig_buffer(fbi->fix.smem_start,
 					    ROTATOR_SRC_DOMAIN,
 					    GEN_POOL,
@@ -1499,6 +1507,7 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 					    SZ_4K,
 					    0,
 					    &(mfd->rotator_iova));
+		MSM_FB_BOOT_TRACE("fb iommu map rotator return fb=%d\n", mfd->index);
 	}
 
 	if ((!bf_supported || mfd->index == 0) && fbi->screen_base)
@@ -1510,11 +1519,14 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	/* cursor memory allocation */
 	if (mfd->cursor_update) {
 		unsigned long cursor_buf_iommu = 0;
+		MSM_FB_BOOT_TRACE("fb cursor alloc enter fb=%d\n", mfd->index);
 		mfd->cursor_buf = dma_alloc_coherent(NULL,
 					MDP_CURSOR_SIZE,
 					(dma_addr_t *) &mfd->cursor_buf_phys,
 					GFP_KERNEL);
+		MSM_FB_BOOT_TRACE("fb cursor alloc return fb=%d\n", mfd->index);
 
+		MSM_FB_BOOT_TRACE("fb cursor iommu enter fb=%d\n", mfd->index);
 		msm_iommu_map_contig_buffer((unsigned long)mfd->cursor_buf_phys,
 					    DISPLAY_READ_DOMAIN,
 					    GEN_POOL,
@@ -1522,6 +1534,7 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 					    SZ_4K,
 					    0,
 					    &cursor_buf_iommu);
+		MSM_FB_BOOT_TRACE("fb cursor iommu return fb=%d\n", mfd->index);
 		if (cursor_buf_iommu)
 			mfd->cursor_buf_phys = (void *)cursor_buf_iommu;
 
@@ -1536,6 +1549,7 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 					__func__);
 	}
 
+	MSM_FB_BOOT_TRACE("fb core register enter fb=%d\n", mfd->index);
 	if (register_framebuffer(fbi) < 0) {
 		if (mfd->lut_update)
 			fb_dealloc_cmap(&fbi->cmap);
@@ -1549,6 +1563,7 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 		mfd->op_enable = FALSE;
 		return -EPERM;
 	}
+	MSM_FB_BOOT_TRACE("fb core register return fb=%d\n", mfd->index);
 
 	if (fbram) {
 		fbram += fix->smem_len;
@@ -4260,6 +4275,7 @@ struct platform_device *msm_fb_add_device(struct platform_device *pdev)
 	 * alloc panel device data
 	 */
 	this_dev = msm_fb_device_alloc(pdata, type, id);
+	MSM_FB_BOOT_TRACE("fb panel device allocated type=%u id=%u\n", type, id);
 
 	if (!this_dev) {
 		printk(KERN_ERR
@@ -4271,6 +4287,7 @@ struct platform_device *msm_fb_add_device(struct platform_device *pdev)
 	 * alloc framebuffer info + par data
 	 */
 	fbi = framebuffer_alloc(sizeof(struct msm_fb_data_type), NULL);
+	MSM_FB_BOOT_TRACE("fb info allocated type=%u id=%u\n", type, id);
 	if (fbi == NULL) {
 		platform_device_put(this_dev);
 		printk(KERN_ERR "msm_fb: can't alloca framebuffer info data!\n");
@@ -4297,6 +4314,7 @@ struct platform_device *msm_fb_add_device(struct platform_device *pdev)
 	 */
 	platform_set_drvdata(this_dev, mfd);
 
+	MSM_FB_BOOT_TRACE("fb add dsi enter fb=%d type=%u\n", mfd->index, type);
 	if (platform_device_add(this_dev)) {
 		printk(KERN_ERR "msm_fb: platform_device_add failed!\n");
 		platform_device_put(this_dev);
@@ -4304,6 +4322,7 @@ struct platform_device *msm_fb_add_device(struct platform_device *pdev)
 		fbi_list_index--;
 		return NULL;
 	}
+	MSM_FB_BOOT_TRACE("fb add dsi return fb=%d type=%u\n", mfd->index, type);
 	return this_dev;
 }
 EXPORT_SYMBOL(msm_fb_add_device);

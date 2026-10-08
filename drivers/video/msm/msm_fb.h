@@ -48,6 +48,17 @@
 #define MFD_KEY  0x11161126
 #define MSM_FB_MAX_DEV_LIST 32
 
+/* Probe checkpoints survive in last_kmsg before Android can start logging. */
+#ifdef CONFIG_MACH_MIONE
+#define MSM_FB_BOOT_TRACE(fmt, ...) \
+	do { \
+		if (machine_is_mione()) \
+			pr_info("mione_display_init: " fmt, ##__VA_ARGS__); \
+	} while (0)
+#else
+#define MSM_FB_BOOT_TRACE(fmt, ...) do { } while (0)
+#endif
+
 struct disp_info_type_suspend {
 	boolean op_enable;
 	boolean sw_refreshing_enable;
