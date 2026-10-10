@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 #include <linux/xattr.h>
 #include <linux/security.h>
+#include <linux/uidgid.h>
 
 #include "kernfs-internal.h"
 

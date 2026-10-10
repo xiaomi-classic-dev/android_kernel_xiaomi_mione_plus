@@ -2223,7 +2223,6 @@ static struct file_system_type cgroup_fs_type = {
 	.name = "cgroup",
 	.mount = cgroup_mount,
 	.kill_sb = cgroup_kill_sb,
-	.fs_flags = FS_USERNS_MOUNT,
 };
 
 static struct kobject *cgroup_kobj;
@@ -2232,7 +2231,6 @@ static struct file_system_type cgroup2_fs_type = {
 	.name = "cgroup2",
 	.mount = cgroup_mount,
 	.kill_sb = cgroup_kill_sb,
-	.fs_flags = FS_USERNS_MOUNT,
 };
 
 static int cgroup_path_ns_locked(struct cgroup *cgrp, char *buf, size_t buflen,
