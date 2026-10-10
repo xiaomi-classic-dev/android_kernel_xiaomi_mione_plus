@@ -4,6 +4,7 @@
 #include <linux/path.h>
 #include <linux/fdtable.h>
 #include <linux/namei.h>
+#include <linux/uidgid.h>
 #include <linux/pid.h>
 #include <linux/security.h>
 #include <linux/file.h>
