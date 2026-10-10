@@ -35,6 +35,9 @@
 #include <linux/list.h>
 #include <linux/pm.h>
 #include <linux/rmi.h>
+#if defined(CONFIG_PM) && defined(CONFIG_FB)
+#include <linux/fb.h>
+#endif
 #include "rmi_driver.h"
 #ifdef CONFIG_RMI4_DEBUG
 #include <linux/debugfs.h>
@@ -56,6 +59,10 @@
 #define RMI_DEVICE_RESET_CMD	0x01
 #define DEFAULT_RESET_DELAY_MS	20
 
+#if defined(CONFIG_PM) && defined(CONFIG_FB)
+static int rmi_driver_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg);
+#endif
 
 /* sysfs files for attributes for driver values. */
 static ssize_t rmi_driver_bsr_show(struct device *dev,
@@ -631,6 +638,12 @@ static int process_interrupt_requests(struct rmi_device *rmi_dev)
 		}
 	}
 
+#ifdef CONFIG_PM
+	/* Reading F01 status acknowledges ATTN, including while asleep. */
+	if (data->suspended)
+		return count;
+#endif
+
 	u8_and(irq_status, irq_status, data->current_irq_mask,
 	       data->num_of_irq_regs);
 	/* At this point, irq_status has all bits that are set in the
@@ -671,9 +684,16 @@ static int rmi_driver_irq_handler(struct rmi_device *rmi_dev, int irq)
 		return 0;
 	}
 
+#ifdef CONFIG_PM
+	/* Serialize input reports with F01 sleep and the final F11 release. */
+	mutex_lock(&data->suspend_mutex);
+#endif
 	do { /* loop until no pending request */
 		error = process_interrupt_requests(rmi_dev);
 	} while (error > 0);
+#ifdef CONFIG_PM
+	mutex_unlock(&data->suspend_mutex);
+#endif
 
 	return error;
 }
@@ -1065,6 +1085,9 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 	INIT_LIST_HEAD(&data->rmi_functions.list);
 	rmi_set_driverdata(rmi_dev, data);
 	mutex_init(&data->pdt_mutex);
+#ifdef CONFIG_PM
+	mutex_init(&data->suspend_mutex);
+#endif
 
 	if (!pdata->reset_delay_ms)
 		pdata->reset_delay_ms = DEFAULT_RESET_DELAY_MS;
@@ -1162,10 +1185,18 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 	data->pre_suspend = pdata->pre_suspend;
 	data->post_resume = pdata->post_resume;
 
-	mutex_init(&data->suspend_mutex);
-
 #endif /* CONFIG_PM */
 	data->enabled = true;
+
+#if defined(CONFIG_PM) && defined(CONFIG_FB)
+	data->rmi_dev = rmi_dev;
+	data->fb_notifier.notifier_call = rmi_driver_fb_event;
+	retval = fb_register_client(&data->fb_notifier);
+	if (retval) {
+		dev_err(dev, "Failed to register display notifier: %d.\n", retval);
+		goto err_free_data;
+	}
+#endif
 
 #ifdef CONFIG_RMI4_DEBUG
 	retval = setup_debugfs(rmi_dev);
@@ -1192,7 +1223,7 @@ static int rmi_driver_probe(struct rmi_device *rmi_dev)
 }
 
 #ifdef CONFIG_PM
-static int rmi_driver_suspend(struct device *dev)
+static int rmi_driver_suspend_locked(struct device *dev)
 {
 	struct rmi_device *rmi_dev;
 	struct rmi_driver_data *data;
@@ -1202,7 +1233,6 @@ static int rmi_driver_suspend(struct device *dev)
 	rmi_dev = to_rmi_device(dev);
 	data = rmi_get_driverdata(rmi_dev);
 
-	mutex_lock(&data->suspend_mutex);
 	if (data->suspended)
 		goto exit;
 
@@ -1228,11 +1258,10 @@ static int rmi_driver_suspend(struct device *dev)
 	data->suspended = true;
 
 exit:
-	mutex_unlock(&data->suspend_mutex);
 	return retval;
 }
 
-static int rmi_driver_resume(struct device *dev)
+static int rmi_driver_resume_locked(struct device *dev)
 {
 	struct rmi_device *rmi_dev;
 	struct rmi_driver_data *data;
@@ -1242,7 +1271,6 @@ static int rmi_driver_resume(struct device *dev)
 	rmi_dev = to_rmi_device(dev);
 	data = rmi_get_driverdata(rmi_dev);
 
-	mutex_lock(&data->suspend_mutex);
 	if (!data->suspended)
 		goto exit;
 
@@ -1269,9 +1297,66 @@ static int rmi_driver_resume(struct device *dev)
 	data->suspended = false;
 
 exit:
+	return retval;
+}
+
+static int rmi_driver_set_suspend(struct device *dev, bool display, bool suspend)
+{
+	struct rmi_device *rmi_dev = to_rmi_device(dev);
+	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
+	bool *requested = display ? &data->display_suspended :
+				   &data->system_suspended;
+	bool previous;
+	int retval;
+
+	mutex_lock(&data->suspend_mutex);
+	previous = *requested;
+	*requested = suspend;
+	/* A system wake for USB or an alarm must not undo display sleep. */
+	if (data->display_suspended || data->system_suspended)
+		retval = rmi_driver_suspend_locked(dev);
+	else
+		retval = rmi_driver_resume_locked(dev);
+	if (retval)
+		*requested = previous;
 	mutex_unlock(&data->suspend_mutex);
 	return retval;
 }
+
+static int rmi_driver_suspend(struct device *dev)
+{
+	return rmi_driver_set_suspend(dev, false, true);
+}
+
+static int rmi_driver_resume(struct device *dev)
+{
+	return rmi_driver_set_suspend(dev, false, false);
+}
+
+#ifdef CONFIG_FB
+static int rmi_driver_fb_event(struct notifier_block *nb,
+		unsigned long event, void *arg)
+{
+	struct fb_event *ev = arg;
+	struct rmi_driver_data *data = container_of(nb,
+		struct rmi_driver_data, fb_notifier);
+	int blank, retval;
+
+	if (event != FB_EVENT_BLANK || !ev || !ev->info ||
+	    ev->info->node != 0 || !ev->data)
+		return NOTIFY_DONE;
+	blank = *(int *)ev->data;
+	if (blank != FB_BLANK_UNBLANK && blank != FB_BLANK_POWERDOWN)
+		return NOTIFY_DONE;
+
+	retval = rmi_driver_set_suspend(&data->rmi_dev->dev, true,
+					blank == FB_BLANK_POWERDOWN);
+	if (retval)
+		dev_warn(&data->rmi_dev->dev,
+			 "Display power transition failed: %d.\n", retval);
+	return NOTIFY_OK;
+}
+#endif
 
 #endif /* CONFIG_PM */
 
@@ -1279,6 +1364,10 @@ static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
 {
 	struct rmi_driver_data *data = rmi_get_driverdata(rmi_dev);
 	int i;
+
+#if defined(CONFIG_PM) && defined(CONFIG_FB)
+	fb_unregister_client(&data->fb_notifier);
+#endif
 
 #ifdef	CONFIG_RMI4_DEBUG
 	teardown_debugfs(rmi_dev);
@@ -1296,19 +1385,14 @@ static int __devexit rmi_driver_remove(struct rmi_device *rmi_dev)
 	return 0;
 }
 
-#if !0 && UNIVERSAL_DEV_PM_OPS
-static UNIVERSAL_DEV_PM_OPS(rmi_driver_pm, rmi_driver_suspend,
-			    rmi_driver_resume, NULL);
-#endif
+static SIMPLE_DEV_PM_OPS(rmi_driver_pm, rmi_driver_suspend,
+			 rmi_driver_resume);
 
 static struct rmi_driver sensor_driver = {
 	.driver = {
 		.owner = THIS_MODULE,
 		.name = "rmi_generic",
-/* early suspend is prefer than normal suspend */
-#if !0 && UNIVERSAL_DEV_PM_OPS
 		.pm = &rmi_driver_pm,
-#endif
 	},
 	.probe = rmi_driver_probe,
 	.irq_handler = rmi_driver_irq_handler,

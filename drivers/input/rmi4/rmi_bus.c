@@ -73,29 +73,22 @@ static int rmi_bus_match(struct device *dev, struct device_driver *driver)
 #ifdef CONFIG_PM
 static int rmi_bus_suspend(struct device *dev)
 {
-#ifdef GENERIC_SUBSYS_PM_OPS
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
 	if (pm && pm->suspend)
 		return pm->suspend(dev);
-#endif
 
 	return 0;
 }
 
 static int rmi_bus_resume(struct device *dev)
 {
-#ifdef GENERIC_SUBSYS_PM_OPS
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
 	if (pm && pm->resume)
 		return pm->resume(dev);
-	else if (dev->driver && dev->driver->resume)
-		return dev->driver->resume(dev);
-#else
 	if (dev->driver && dev->driver->resume)
 		return dev->driver->resume(dev);
-#endif
 
 	return 0;
 }

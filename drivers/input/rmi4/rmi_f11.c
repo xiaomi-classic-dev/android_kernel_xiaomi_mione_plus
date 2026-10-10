@@ -1214,9 +1214,19 @@ int rmi_f11_attention(struct rmi_function_container *fc, u8 *irq_bits)
 static int rmi_f11_suspend(struct rmi_function_container *fc)
 {
 	struct f11_data *f11 = fc->data;
-	int i;
+	int i, finger;
 
 	for (i = 0; i < f11->dev_query.nbr_of_sensors + 1; i++) {
+		struct f11_2d_sensor *sensor = &f11->sensors[i];
+
+		/* Type-A MT needs an empty frame to release contacts and keys. */
+		for (finger = 0; finger < sensor->nbr_fingers; finger++) {
+			if (sensor->finger_tracker[finger]) {
+				input_mt_sync(sensor->input);
+				input_sync(sensor->input);
+				break;
+			}
+		}
 		memset(f11->sensors[i].finger_tracker, 0,
 			sizeof(f11->sensors[i].finger_tracker));
 	}

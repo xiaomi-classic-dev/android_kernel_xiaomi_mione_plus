@@ -19,6 +19,10 @@
 #ifndef _RMI_DRIVER_H
 #define _RMI_DRIVER_H
 
+#if defined(CONFIG_PM) && defined(CONFIG_FB)
+#include <linux/notifier.h>
+#endif
+
 #define RMI_DRIVER_VERSION "1.3"
 
 #define RMI_PRODUCT_ID_LENGTH    10
@@ -55,7 +59,14 @@ struct rmi_driver_data {
 
 #ifdef CONFIG_PM
 	bool suspended;
+	bool system_suspended;
+	bool display_suspended;
 	struct mutex suspend_mutex;
+
+#ifdef CONFIG_FB
+	struct notifier_block fb_notifier;
+	struct rmi_device *rmi_dev;
+#endif
 
 	void *pm_data;
 	int (*pre_suspend) (const void *pm_data);
