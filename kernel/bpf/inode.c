@@ -190,14 +190,14 @@ static int bpf_mkobj(struct inode *dir, struct dentry *dentry, umode_t mode,
 }
 
 static struct dentry *
-bpf_lookup(struct inode *dir, struct dentry *dentry, unsigned flags)
+bpf_lookup(struct inode *dir, struct dentry *dentry, struct nameidata *nd)
 {
 	/* Dots in names (e.g. "/sys/fs/bpf/foo.bar") are reserved for future
 	 * extensions.
 	 */
 	if (strchr(dentry->d_name.name, '.'))
 		return ERR_PTR(-EPERM);
-	return simple_lookup(dir, dentry, flags);
+	return simple_lookup(dir, dentry, nd);
 }
 
 static const struct inode_operations bpf_dir_iops = {

@@ -70,7 +70,7 @@ static const struct file_operations proc_fdinfo_file_operations = {
 	.release	= single_release,
 };
 
-static int tid_fd_revalidate(struct dentry *dentry, unsigned int flags)
+static int tid_fd_revalidate(struct dentry *dentry, struct nameidata *nd)
 {
 	struct files_struct *files;
 	struct task_struct *task;
@@ -78,7 +78,7 @@ static int tid_fd_revalidate(struct dentry *dentry, unsigned int flags)
 	struct inode *inode;
 	int fd;
 
-	if (flags & LOOKUP_RCU)
+	if (nd && (nd->flags & LOOKUP_RCU))
 		return -ECHILD;
 
 	inode = dentry->d_inode;
@@ -193,7 +193,7 @@ proc_fd_instantiate(struct inode *dir, struct dentry *dentry,
 	d_add(dentry, inode);
 
 	/* Close the race of the process dying before we return the dentry */
-	if (tid_fd_revalidate(dentry, 0))
+	if (tid_fd_revalidate(dentry, NULL))
 		error = NULL;
  out:
 	return error;
@@ -291,7 +291,7 @@ const struct file_operations proc_fd_operations = {
 };
 
 static struct dentry *proc_lookupfd(struct inode *dir, struct dentry *dentry,
-				    unsigned int flags)
+				    struct nameidata *nd)
 {
 	return proc_lookupfd_common(dir, dentry, proc_fd_instantiate);
 }
@@ -339,14 +339,14 @@ proc_fdinfo_instantiate(struct inode *dir, struct dentry *dentry,
 	d_add(dentry, inode);
 
 	/* Close the race of the process dying before we return the dentry */
-	if (tid_fd_revalidate(dentry, 0))
+	if (tid_fd_revalidate(dentry, NULL))
 		error = NULL;
  out:
 	return error;
 }
 
 static struct dentry *
-proc_lookupfdinfo(struct inode *dir, struct dentry *dentry, unsigned int flags)
+proc_lookupfdinfo(struct inode *dir, struct dentry *dentry, struct nameidata *nd)
 {
 	return proc_lookupfd_common(dir, dentry, proc_fdinfo_instantiate);
 }

@@ -556,11 +556,11 @@ void kernfs_put(struct kernfs_node *kn)
 }
 EXPORT_SYMBOL_GPL(kernfs_put);
 
-static int kernfs_dop_revalidate(struct dentry *dentry, unsigned int flags)
+static int kernfs_dop_revalidate(struct dentry *dentry, struct nameidata *nd)
 {
 	struct kernfs_node *kn;
 
-	if (flags & LOOKUP_RCU)
+	if (nd && (nd->flags & LOOKUP_RCU))
 		return -ECHILD;
 
 	/* Always perform fresh lookup for negatives */
@@ -947,7 +947,7 @@ struct kernfs_node *kernfs_create_dir_ns(struct kernfs_node *parent,
 
 static struct dentry *kernfs_iop_lookup(struct inode *dir,
 					struct dentry *dentry,
-					unsigned int flags)
+					struct nameidata *nd)
 {
 	struct dentry *ret;
 	struct kernfs_node *parent = dentry->d_parent->d_fsdata;
