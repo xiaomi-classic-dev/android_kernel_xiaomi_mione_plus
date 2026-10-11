@@ -3276,7 +3276,7 @@ static int binder_ioctl_set_ctx_mgr(struct file *filp,
 		goto out;
 	if (context->binder_context_mgr_uid != (uid_t)-1) {
 		if (context->binder_context_mgr_uid != current->cred->euid) {
-			binder_debug(BINDER_DEBUG_TOP_ERRORS,
+			binder_debug(BINDER_DEBUG_USER_ERROR,
 				     "binder: BINDER_SET_"
 				     "CONTEXT_MGR bad uid %d != %d\n",
 				     current->cred->euid,
