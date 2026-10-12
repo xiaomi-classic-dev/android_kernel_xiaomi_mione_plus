@@ -368,6 +368,7 @@ static int ffs_function_init(struct android_usb_function *f,
 			     struct usb_composite_dev *cdev)
 {
 	struct functionfs_config *config;
+	int ret;
 
 	config = kzalloc(sizeof(*config), GFP_KERNEL);
 	if (!config)
@@ -377,7 +378,12 @@ static int ffs_function_init(struct android_usb_function *f,
 	config->dev = cdev_to_android_dev(cdev);
 	f->config = config;
 
-	return functionfs_init();
+	ret = functionfs_init();
+	if (ret) {
+		kfree(config);
+		f->config = NULL;
+	}
+	return ret;
 }
 
 static void ffs_function_cleanup(struct android_usb_function *f)
