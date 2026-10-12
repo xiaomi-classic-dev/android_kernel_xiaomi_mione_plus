@@ -685,11 +685,18 @@ static struct msm_sensor_exp_gain_info_t mt9e013_exp_gain_info = {
 static int32_t mt9e013_write_exp_gain(struct msm_sensor_ctrl_t *s_ctrl,
 				      uint16_t gain, uint32_t line)
 {
-	uint32_t fl_lines;
+	u64 fl_lines;
 	fl_lines =
-	    (s_ctrl->curr_frame_length_lines * s_ctrl->fps_divider) / Q10;
+	    ((u64)s_ctrl->curr_frame_length_lines * s_ctrl->fps_divider) / Q10;
+	if (line > fl_lines)
+		fl_lines = line;
+	if (!fl_lines || fl_lines > 0xffff || line > 0xffff)
+		return -EINVAL;
 
 	s_ctrl->func_tbl->sensor_group_hold_on(s_ctrl);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+			     s_ctrl->sensor_output_reg_addr->frame_length_lines,
+			     fl_lines, MSM_CAMERA_I2C_WORD_DATA);
 	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
 			     s_ctrl->sensor_exp_gain_info->global_gain_addr,
 			     gain | 0x1000, MSM_CAMERA_I2C_WORD_DATA);
@@ -702,11 +709,18 @@ static int32_t mt9e013_write_exp_gain(struct msm_sensor_ctrl_t *s_ctrl,
 
 static int32_t mt9e013_write_exp_snapshot_gain
     (struct msm_sensor_ctrl_t *s_ctrl, uint16_t gain, uint32_t line) {
-	uint32_t fl_lines;
+	u64 fl_lines;
 	fl_lines =
-	    (s_ctrl->curr_frame_length_lines * s_ctrl->fps_divider) / Q10;
+	    ((u64)s_ctrl->curr_frame_length_lines * s_ctrl->fps_divider) / Q10;
+	if (line > fl_lines)
+		fl_lines = line;
+	if (!fl_lines || fl_lines > 0xffff || line > 0xffff)
+		return -EINVAL;
 
 	s_ctrl->func_tbl->sensor_group_hold_on(s_ctrl);
+	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
+			     s_ctrl->sensor_output_reg_addr->frame_length_lines,
+			     fl_lines, MSM_CAMERA_I2C_WORD_DATA);
 	msm_camera_i2c_write(s_ctrl->sensor_i2c_client,
 			     s_ctrl->sensor_exp_gain_info->global_gain_addr,
 			     gain | 0x1000, MSM_CAMERA_I2C_WORD_DATA);
