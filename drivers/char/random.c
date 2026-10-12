@@ -250,6 +250,7 @@
 #include <linux/interrupt.h>
 #include <linux/mm.h>
 #include <linux/spinlock.h>
+#include <linux/kthread.h>
 #include <linux/percpu.h>
 #include <linux/cryptohash.h>
 #include <linux/fips.h>
@@ -287,6 +288,10 @@
 #define DEBUG_RANDOM_BOOT 0
 
 #define LONGS(x) (((x) + sizeof(unsigned long) - 1)/sizeof(unsigned long))
+
+/* Entropy counters use fractional units of one eighth of a bit. */
+#define ENTROPY_SHIFT 3
+#define ENTROPY_BITS(r) ((r)->entropy_count >> ENTROPY_SHIFT)
 
 /*
  * The minimum number of bits of entropy before we wake up a read on
@@ -728,6 +733,7 @@ static void crng_initialize(struct crng_state *crng)
 static int crng_fast_load(const char *cp, size_t len)
 {
 	unsigned long flags;
+	bool initialized = false;
 	char *p;
 
 	if (!spin_trylock_irqsave(&primary_crng.lock, flags))
@@ -743,16 +749,20 @@ static int crng_fast_load(const char *cp, size_t len)
 	}
 	if (crng_init_cnt >= CRNG_INIT_CNT_THRESH) {
 		crng_init = 1;
-		wake_up_interruptible(&crng_init_wait);
+		initialized = true;
+		wake_up_all(&crng_init_wait);
 		pr_notice("random: fast init done\n");
 	}
 	spin_unlock_irqrestore(&primary_crng.lock, flags);
+	if (initialized)
+		prandom_reseed_late();
 	return 1;
 }
 
 static void crng_reseed(struct crng_state *crng, struct entropy_store *r)
 {
 	unsigned long	flags;
+	bool initialized = false;
 	int		i, num;
 	union {
 		__u8	block[CHACHA20_BLOCK_SIZE];
@@ -777,10 +787,13 @@ static void crng_reseed(struct crng_state *crng, struct entropy_store *r)
 	crng->init_time = jiffies;
 	if (crng == &primary_crng && crng_init < 2) {
 		crng_init = 2;
-		wake_up_interruptible(&crng_init_wait);
+		initialized = true;
+		wake_up_all(&crng_init_wait);
 		pr_notice("random: crng init done\n");
 	}
 	spin_unlock_irqrestore(&primary_crng.lock, flags);
+	if (initialized)
+		prandom_reseed_late();
 }
 
 static inline void crng_wait_ready(void)
