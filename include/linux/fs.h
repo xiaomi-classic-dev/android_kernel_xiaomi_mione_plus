@@ -333,7 +333,9 @@ struct inodes_stat_t {
 #define FITHAW		_IOWR('X', 120, int)	/* Thaw */
 #define FITRIM		_IOWR('X', 121, struct fstrim_range)	/* Trim */
 
-#define RENAME_NOREPLACE (1 << 0)
+#ifndef RENAME_NOREPLACE
+#define RENAME_NOREPLACE (1<<0)
+#endif
 
 #define	FS_IOC_GETFLAGS			_IOR('f', 1, long)
 #define	FS_IOC_SETFLAGS			_IOW('f', 2, long)
