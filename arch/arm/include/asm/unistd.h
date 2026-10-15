@@ -429,7 +429,7 @@
  * account for the padding in the syscall table
  */
 #ifdef __KERNEL__
-#define __NR_syscalls  (388)
+#define __NR_syscalls  (452)
 #endif
 
 /*
