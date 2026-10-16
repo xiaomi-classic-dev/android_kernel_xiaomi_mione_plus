@@ -29,6 +29,7 @@
 #include <linux/pid_namespace.h>
 #include <linux/nsproxy.h>
 #include <linux/user_namespace.h>
+#include <linux/uidgid.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
 
